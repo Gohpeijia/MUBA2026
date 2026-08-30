@@ -109,8 +109,8 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
               <FaRobot size={14} />
             </div>
             <div>
-              <div className="ai-panel__title">Penasihat Syariah AI</div>
-              <div className="ai-panel__subtitle">Panduan Syariah Peribadi Anda</div>
+              <div className="ai-panel__title">Finova AI</div>
+              <div className="ai-panel__subtitle">Your personal AI trading agent</div>
             </div>
           </div>
           
@@ -205,7 +205,7 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
           <textarea
             ref={textareaRef}
             className="ai-panel__textarea"
-            placeholder="Tanya tentang pelaburan patuh Syariah…"
+            placeholder="Ask anything about stocks..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

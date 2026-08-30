@@ -82,8 +82,8 @@ export default function Advisor() {
       {/* Header */}
       <div className="advisor-header">
         <div>
-          <h1 className="advisor-main-title">Penasihat Syariah AI</h1>
-          <p className="advisor-subtitle">Panduan Syariah Peribadi Anda</p>
+          <h1 className="advisor-main-title">Finova AI</h1>
+          <p className="advisor-subtitle">Your personal AI trading agent</p>
         </div>
       </div>
 
@@ -179,7 +179,7 @@ export default function Advisor() {
         <textarea
           ref={textareaRef}
           className="input-textarea"
-          placeholder="Tanya tentang pelaburan patuh Syariah, zakat, dan kepatuhan Syariah…"
+          placeholder="Anything on head?"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}

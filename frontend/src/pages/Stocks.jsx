@@ -196,8 +196,8 @@ export default function Stocks() {
       })
       .catch(err => {
         if (cancelled) return;
-        console.error('Stock data error:', err);
-        setErrorMsg(`Gagal mendapatkan data untuk ${activeTicker}. Semak ticker dan cuba lagi.`);
+        console.error('data error:', err);
+        setErrorMsg(`Fail to get data for ${activeTicker}. Check sticker and try again`);
       })
       .finally(() => {
         if (!cancelled) {
@@ -317,9 +317,9 @@ export default function Stocks() {
         {!activeTicker && !errorMsg && (
           <div className="stocks-empty-state">
             <div className="stocks-empty-icon">📈</div>
-            <h3 className="stocks-empty-title">Cari saham untuk mula</h3>
+            <h3 className="stocks-empty-title">Search for a stock to start</h3>
             <p className="stocks-empty-sub">
-              Gunakan bar carian di atas untuk mencari saham, atau pilih satu daripada senarai pantauan anda
+              Use the search bar above or click any of the stock from your watchlist
             </p>
           </div>
         )}

@@ -99,7 +99,7 @@ const StockSearchBar = memo(function StockSearchBar({ onSelect, fetchSearchResul
         <input
           className="stock-search-input"
           type="text"
-          placeholder="Cari saham melalui ticker atau nama…"
+          placeholder="Find stock from sticker or name…"
           value={query}
           onChange={handleChange}
           onKeyDown={handleKeyDown} // Attached keyboard listener here

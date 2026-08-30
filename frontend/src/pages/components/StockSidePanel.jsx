@@ -76,7 +76,7 @@ export default function StockSidePanel({
         {watchlist.length === 0 ? (
           <div className="sidepanel-empty">
             <div className="sidepanel-empty-icon">☆</div>
-            <p>Belum ada saham disimpan. Cari saham dan tekan ikon bintang untuk menambahkannya di sini.</p>
+            <p>No saved stock watchlist. Click on the star button to save to watchlist</p>
           </div>
         ) : (
           watchlist.map(stock => (

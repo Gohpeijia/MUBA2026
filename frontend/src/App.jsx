@@ -3,12 +3,12 @@ import './App.css'
 import { BrowserRouter, Routes, Route, Link, useLocation,useNavigate } from 'react-router-dom';
 import Advisor from './pages/Advisor';
 import Auth from './pages/Auth';
-import Zakat from './pages/Zakat';
 import Stocks from './pages/Stocks';
 import Preferences from './pages/Preferences';
+import InvestmentDashboard from './pages/InvestmentDashboard';
 
 
-import { FaCalculator, FaThLarge, FaRobot, FaSignOutAlt, FaChartLine } from 'react-icons/fa';
+import { FaThLarge, FaRobot, FaSignOutAlt, FaChartLine, FaWallet } from 'react-icons/fa';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
 
@@ -40,21 +40,21 @@ function NavBar() {
   
   return (
     <nav className={isStocks ? 'nav-icon-only' : ''}>
-      <Link className="nav-zakat" to="/zakat" title="Zakat">
-        <FaCalculator />
-        {!isStocks && <span>Rancangan kewangan</span>}
+      <Link className="nav-dashboard" to="/dashboard" title="Dashboard">
+        <FaWallet />
+        {!isStocks && <span>Dashboard</span>}
       </Link>
       <Link className="nav-stocks" to="/stocks" title="Stocks">
         <FaChartLine />
-        {!isStocks && <span>Saham</span>}
+        {!isStocks && <span>Positions</span>}
       </Link>
       <Link className="nav-advisor" to="/advisor" title="AI Advisor">
         <FaRobot />
-        {!isStocks && <span>Penasihat AI</span>}
+        {!isStocks && <span>AI Advisor</span>}
       </Link>
       <a href="#" className="nav-logout" onClick={handleLogout} title="Log out">
         <FaSignOutAlt />
-        {!isStocks && <span>Log Keluar</span>}
+        {!isStocks && <span>Log Out</span>}
       </a>
     </nav>
   );
@@ -67,7 +67,7 @@ function AppShell() {
   const isStocks = location.pathname === '/stocks';
   // 1. Check if the user is on the Auth or Preferences page
   const isAuthOrPref = location.pathname === '/' || location.pathname === '/preferences';
-  const showPanel = location.pathname === '/zakat' || location.pathname === '/stocks';
+  const showPanel = location.pathname === '/stocks' || location.pathname === '/dashboard';
 
   /* Dynamically calculate layout boundaries */
   const mainStyle = {
@@ -84,8 +84,8 @@ function AppShell() {
       {/* Page content wrapper dynamically handles layout constraints */}
       <div className="app-container" style={mainStyle}>
         <Routes>
-          <Route path="/stocks"  element={<Stocks />} />
-          <Route path="/zakat"   element={<Zakat />} />
+          <Route path="/dashboard"    element={<InvestmentDashboard />} />
+          <Route path="/stocks"       element={<Stocks />} />
           <Route path="/preferences" element={<Preferences />} /> 
           <Route path="/advisor" element={<Advisor />} />
           <Route path="/"        element={<Auth />} />

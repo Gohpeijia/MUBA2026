@@ -14,38 +14,58 @@ import '../shared.css';
 const STEPS = [
   {
     key: 'employmentStatus',
-    question: 'Apakah status pekerjaan anda?',
+    question: 'What is your employment status?',
     type: 'chips',
-    options: ['Bekerja (Swasta)', 'Bekerja (Kerajaan)', 'Bekerja Sendiri', 'Pelajar', 'Tidak Bekerja'],
+    options: ['Employed (Private)', 'Employed (Government)', 'Self-Employed', 'Student', 'Not Employed'],
   },
   {
     key: 'monthlyIncome',
-    question: 'Berapakah anggaran pendapatan bulanan anda?',
+    question: 'What is your estimated monthly income?',
     type: 'number',
     prefix: 'RM',
-    placeholder: 'cth: 5000',
+    placeholder: 'e.g. 5000',
   },
   {
     key: 'investmentExperience',
-    question: 'Apakah pengalaman pelaburan anda?',
+    question: 'What is your experience with on-chain options trading (Thetanuts, DeFi options)?',
     type: 'chips',
-    options: ['Tiada Pengalaman', 'Pemula (< 1 tahun)', 'Pertengahan (1–5 tahun)', 'Berpengalaman (> 5 tahun)'],
+    options: ['No Experience', 'Beginner (< 1 year)', 'Intermediate (1–5 years)', 'Experienced (> 5 years)'],
   },
   {
     key: 'riskTolerance',
-    question: 'Apakah tahap toleransi risiko anda?',
+    question: 'What is your risk tolerance level?',
     type: 'chips',
-    options: ['Rendah (Selamat)', 'Sederhana', 'Tinggi (Agresif)'],
+    options: ['Low (Conservative)', 'Moderate', 'High (Aggressive)'],
   },
   {
-    key: 'zakatGoal',
-    question: 'Apakah matlamat utama anda menggunakan Amanah?',
+    key: 'riskCopilotMode',
+    question: 'How should your Risk Copilot assist you?',
     type: 'chips',
     options: [
-      'Kira & jejak zakat saya',
-      'Urus aset & liabiliti',
-      'Dapatkan nasihat pelaburan',
-      'Kesemuanya',
+      'Alert me only, I act manually',
+      'Suggest actions, I confirm each one',
+      'Fully automated recommendations',
+    ],
+  },
+  {
+    key: 'autoHedgingAgent',
+    question: 'Do you want to enable the Autonomous Hedging Agent for your OptionBook / OptionFactory positions?',
+    type: 'chips',
+    options: [
+      'Yes, fully autonomous hedging',
+      'Yes, but confirm before executing on-chain',
+      'No, I will hedge manually',
+    ],
+  },
+  {
+    key: 'primaryGoal',
+    question: 'What is your main goal for using this agent?',
+    type: 'chips',
+    options: [
+      'Track & analyze my options positions',
+      'Manage risk & automate hedging',
+      'Get AI trading advice & insights',
+      'All of the above',
     ],
   },
 ];
@@ -84,7 +104,7 @@ export default function Preferences() {
     setError('');
 
     if (!isCurrentAnswered()) {
-      setError('Sila pilih atau isi jawapan sebelum meneruskan.');
+      setError('Please select or fill in an answer before continuing.');
       return;
     }
 
@@ -97,7 +117,7 @@ export default function Preferences() {
     setSaving(true);
     try {
       const user = auth.currentUser;
-      if (!user) throw new Error('Pengguna tidak dijumpai. Sila log masuk semula.');
+      if (!user) throw new Error('User not found. Please sign in again.');
 
       // 1. Get the secure token for the backend @require_auth decorator
       const token = await user.getIdToken();
@@ -109,13 +129,15 @@ export default function Preferences() {
           monthlyIncome: Number(answers.monthlyIncome) || 0,
           investmentExperience: answers.investmentExperience || '',
           riskTolerance: answers.riskTolerance || '',
-          zakatGoal: answers.zakatGoal || ''
+          riskCopilotMode: answers.riskCopilotMode || '',
+          autoHedgingAgent: answers.autoHedgingAgent || '',
+          primaryGoal: answers.primaryGoal || ''
         }
       };
 
       // 3. Send the data to your Flask server
       const response = await axios.post(
-        'http://127.0.0.1:5000/api/stocks/portfolio/update', 
+        'http://127.0.0.1:5000/api/stocks/portfolio/update',
         payload,
         {
           headers: {
@@ -125,15 +147,15 @@ export default function Preferences() {
       );
 
       if (!response.data.success) {
-        throw new Error(response.data.error || 'Ralat menyimpan data.');
+        throw new Error(response.data.error || 'Error saving data.');
       }
 
       setDone(true);
-      setTimeout(() => navigate('/zakat'), 2000);
+      setTimeout(() => navigate('/risk-copilot'), 2000);
 
     } catch (err) {
       // Catch backend errors or network errors safely
-      setError(err.response?.data?.error || err.message || 'Ralat menyimpan data. Sila cuba lagi.');
+      setError(err.response?.data?.error || err.message || 'Error saving data. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -151,9 +173,9 @@ export default function Preferences() {
         <div className="pref-card">
           <div className="pref-complete">
             <div className="pref-complete-icon">✅</div>
-            <h2 className="pref-complete-title">Terima kasih!</h2>
+            <h2 className="pref-complete-title">Thank you!</h2>
             <p className="pref-complete-text">
-              Profil anda telah disimpan. Kami sedang menyediakan pengalaman terbaik untuk anda…
+              Your profile has been saved. We're setting up your Risk Copilot and Hedging Agent…
             </p>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
               <span className="pref-spinner" style={{
@@ -175,14 +197,14 @@ export default function Preferences() {
 
         {/* Header */}
         <div className="pref-header">
-          <h1 className="pref-title">Profil Kewangan</h1>
-          <p className="pref-subtitle">Bantu kami memahami keperluan zakat anda</p>
+          <h1 className="pref-title">Trading Profile</h1>
+          <p className="pref-subtitle">Help us configure your Risk Copilot and Hedging Agent</p>
         </div>
 
         {/* Progress */}
         <div className="pref-progress-wrap">
           <div className="pref-progress-label">
-            <span>Soalan {step + 1} daripada {totalSteps}</span>
+            <span>Question {step + 1} of {totalSteps}</span>
             <span>{progressPct}%</span>
           </div>
           <div className="pref-progress-bar">
@@ -202,7 +224,7 @@ export default function Preferences() {
 
         {/* Question */}
         <div className="pref-question">
-          <div className="pref-question-label">Soalan {step + 1}</div>
+          <div className="pref-question-label">Question {step + 1}</div>
           <p className="pref-question-text">{current.question}</p>
 
           {/* Chips */}
@@ -260,7 +282,7 @@ export default function Preferences() {
             onClick={handleBack}
             disabled={step === 0 || saving}
           >
-            ← Kembali
+            ← Back
           </button>
 
           <button
@@ -272,9 +294,9 @@ export default function Preferences() {
             {saving ? (
               <span className="pref-spinner" />
             ) : step < totalSteps - 1 ? (
-              'Seterusnya →'
+              'Next →'
             ) : (
-              'Simpan & Mulakan ✓'
+              'Save & Start ✓'
             )}
           </button>
         </div>

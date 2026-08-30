@@ -49,17 +49,17 @@ export default function Auth() {
 
   function friendlyError(code) {
     const map = {
-      'auth/email-already-in-use':   'Emel ini sudah didaftarkan. Cuba log masuk.',
-      'auth/invalid-email':           'Format emel tidak sah.',
-      'auth/weak-password':           'Kata laluan mestilah sekurang-kurangnya 6 aksara.',
-      'auth/user-not-found':          'Akaun tidak dijumpai. Cuba daftar dahulu.',
-      'auth/wrong-password':          'Kata laluan tidak betul.',
-      'auth/invalid-credential':      'Emel atau kata laluan tidak betul.',
-      'auth/popup-closed-by-user':    'Log masuk Google dibatalkan.',
+      'auth/email-already-in-use':   'This email has been registered, try to login.',
+      'auth/invalid-email':           'Wrong email format.',
+      'auth/weak-password':           'Password need at least 6 characters.',
+      'auth/user-not-found':          'Account not found, please register your account',
+      'auth/wrong-password':          'Wrong password',
+      'auth/invalid-credential':      'Wrong email or password',
+      'auth/popup-closed-by-user':    'Google login cancelled',
       'auth/account-exists-with-different-credential':
-        'Akaun ini wujud dengan kaedah log masuk lain.',
+        'This account login using different method',
     };
-    return map[code] || 'Ralat tidak dijangka. Sila cuba lagi.';
+    return map[code] || 'An error occur, please try again';
   }
 
   /* ─── Sign Up (email + password) ──────────────────────── */
@@ -68,11 +68,11 @@ export default function Auth() {
     setError('');
 
     if (password !== confirmPassword) {
-      setError('Kata laluan tidak sepadan.');
+      setError('Passwords do not match');
       return;
     }
     if (password.length < 6) {
-      setError('Kata laluan mestilah sekurang-kurangnya 6 aksara.');
+      setError('Password need at least 6 character');
       return;
     }
 
@@ -151,9 +151,9 @@ export default function Auth() {
 
         {/* Branding */}
         <div className="auth-brand">
-          <h1 className="auth-brand-title">AmanahAI</h1>
+          <h1 className="auth-brand-title">Finova</h1>
           <p className="auth-brand-subtitle">
-            {isSignUp ? 'Daftar akaun baharu anda' : 'Selamat kembali'}
+            {isSignUp ? 'Please sign up a account' : 'Welcome back !'}
           </p>
         </div>
 
@@ -163,13 +163,13 @@ export default function Auth() {
             className={`auth-tab ${!isSignUp ? 'active' : ''}`}
             onClick={() => { setMode('signin'); setError(''); }}
           >
-            Log Masuk
+            Login
           </button>
           <button
             className={`auth-tab ${isSignUp ? 'active' : ''}`}
             onClick={() => { setMode('signup'); setError(''); }}
           >
-            Daftar
+            Register
           </button>
         </div>
 
@@ -187,13 +187,13 @@ export default function Auth() {
         >
           {/* Email */}
           <div className="auth-field">
-            <label className="auth-label">Emel</label>
+            <label className="auth-label">Email</label>
             <div className="auth-input-wrap">
               <span className="auth-input-icon"><FiMail /></span>
               <input
                 className="auth-input"
                 type="email"
-                placeholder="nama@emel.com"
+                placeholder="name@email.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
@@ -204,13 +204,13 @@ export default function Auth() {
 
           {/* Password */}
           <div className="auth-field">
-            <label className="auth-label">Kata Laluan</label>
+            <label className="auth-label">Password</label>
             <div className="auth-input-wrap">
               <span className="auth-input-icon"><FiLock /></span>
               <input
                 className="auth-input"
                 type={showPassword ? 'text' : 'password'}
-                placeholder={isSignUp ? 'Sekurang-kurangnya 6 aksara' : 'Kata laluan anda'}
+                placeholder={isSignUp ? 'At Least 6 characters' : 'Your Password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 required
@@ -231,7 +231,7 @@ export default function Auth() {
           {/* Confirm Password (sign up only) */}
           {isSignUp && (
             <div className="auth-field">
-              <label className="auth-label">Sahkan Kata Laluan</label>
+              <label className="auth-label">Confirm Password</label>
               <div className="auth-input-wrap">
                 <span className="auth-input-icon"><FiLock /></span>
                 <input
@@ -260,13 +260,13 @@ export default function Auth() {
           <button className="auth-btn-primary" type="submit" disabled={loading}>
             {loading
               ? <span className="auth-spinner" />
-              : isSignUp ? 'Daftar Akaun' : 'Log Masuk'
+              : isSignUp ? 'Register' : 'Login'
             }
           </button>
         </form>
 
         {/* Divider */}
-        <div className="auth-divider">atau teruskan dengan</div>
+        <div className="auth-divider">or continue with</div>
 
         {/* Google */}
         <button

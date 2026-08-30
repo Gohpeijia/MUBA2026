@@ -141,7 +141,7 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
     console.error("AI Advisor Error:", error);
     setMessages(prev => [
       ...prev,
-      { role: 'assistant', content: 'Ralat berlaku. Sila semak sambungan anda dan cuba lagi.' },
+      { role: 'assistant', content: 'An error occurred. Please check your connection and try again.' },
     ]);
   } finally {
     setLoading(false);

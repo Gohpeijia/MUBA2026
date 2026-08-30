@@ -1,18 +1,13 @@
 <div align="center">
 
-# 🕌 Amanah — Islamic AI Investment Advisor
 
-**A Shariah-compliant financial intelligence platform built for Malaysian retail investors.**
-
-Amanah combines an 8-agent AI swarm, real-time Bursa Malaysia market data, and Islamic finance principles to deliver halal investment guidance — all in Bahasa Melayu.
 
 [![React](https://img.shields.io/badge/React-19+-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask)](https://flask.palletsprojects.com)
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore%20%2B%20Auth-FFCA28?style=flat&logo=firebase&logoColor=black)](https://firebase.google.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-> Built for **FinHack 2026**
+ 
 
 </div>
 

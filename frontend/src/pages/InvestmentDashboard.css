@@ -1,0 +1,356 @@
+/* ============================================================
+   InvestmentDashboard.css
+   AI trade history + holdings P&L view. Reuses the teal/gold
+   tokens + Playfair/DM Sans pairing from RiskCopilot.css.
+   ============================================================ */
+
+.risk-page {
+  width: 100%;
+  max-width: 1400px; /* Optional: keeps it from getting too stretched on ultra-wide monitors */
+  
+  /* 2. Keep the rest of the layout rules */
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+  box-sizing: border-box; /* Ensures padding doesn't break the 100% width */
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+}
+
+.risk-header {
+  margin-bottom: 2.2rem;
+  padding-bottom: 1.4rem;
+  border-bottom: 2px solid var(--border);
+}
+
+.risk-main-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--teal);
+  margin: 0 0 0.35rem;
+  letter-spacing: -0.02em;
+}
+
+.risk-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  margin: 0;
+  font-weight: 400;
+}
+
+.inv-page {
+  width : 100%;
+}
+
+.inv-greeting {
+  font-size: 2.6rem;
+}
+
+@media (max-width: 768px) {
+  .risk-page {
+    padding: 1rem;
+  }
+  .risk-main-title {
+    font-size: 2.2rem;
+  }
+}
+
+/* ── Grid ── */
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.3rem;
+}
+
+@media (max-width: 700px) {
+  .inv-grid { grid-template-columns: 1fr; }
+}
+
+.inv-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1.5rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.inv-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+}
+
+.inv-card--hero {
+  grid-column: 1 / -1;
+  border-top: 4px solid var(--teal);
+  gap: 0.3rem;
+}
+
+.inv-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* ── Hero portfolio value ── */
+.inv-hero-value {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.inv-hero-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  width: fit-content;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+}
+
+.inv-up   { color: var(--green, #1a8c5b); background: var(--green-soft, #e6f7ef); }
+.inv-down { color: var(--red, #c0392b);   background: #fff0f0; }
+
+.inv-hero-caption {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0.3rem 0 0;
+}
+
+/* ── Card head (icon + label) ── */
+.inv-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.inv-icon-badge {
+  font-size: 1.6rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.inv-card-sub {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.15rem 0 0;
+}
+
+/* ── Realized / unrealized split (hero card) ── */
+.inv-pnl-split {
+  display: flex;
+  gap: 1.2rem;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.inv-up-text   { color: var(--green, #1a8c5b); }
+.inv-down-text { color: var(--red, #c0392b); }
+
+/* ── Holdings grid ── */
+.hold-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.hold-card {
+  background: var(--bg, #f4f7f7);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.hold-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.hold-ticker {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-right: 0.5rem;
+}
+
+.hold-company {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.hold-pnl-pct {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.hold-stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.hold-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.hold-stat-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.hold-stat-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.hold-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.hold-mv-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.hold-mv-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-left: 0.3rem;
+  margin-right: auto;
+}
+
+.hold-gain {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* ── Trade filter buttons ── */
+.trade-filter-group {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.trade-filter-btn {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  transition: all 0.15s ease;
+}
+
+.trade-filter-btn:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.trade-filter-btn.active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+
+/* ── Trade history list ── */
+.trade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--bg, #f4f7f7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 7px);
+}
+
+.trade-row-reason {
+  grid-column: 1 / -1;
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.trade-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.trade-badge--buy {
+  background: var(--green-soft, #e6f7ef);
+  color: var(--green, #1a8c5b);
+}
+
+.trade-badge--sell {
+  background: #fff0f0;
+  color: var(--red, #c0392b);
+}
+
+.trade-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.trade-row-ticker {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.trade-row-detail {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.trade-row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
+
+.trade-row-total {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.trade-row-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
