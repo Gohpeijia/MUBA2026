@@ -1,0 +1,450 @@
+/* ============================================================
+   Advisor.css — Islamic Investment App, AI Advisor Page
+   Consistent with Zakat.css design system
+   Colors: Deep teal + warm gold accents on soft off-white
+   Font: Playfair Display for headings, DM Sans for body
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=DM+Sans:wght=300;400;500;600&display=swap');
+
+/* ── Page Shell ── */
+.advisor-page {
+  /* 🌟 Force the container to expand fully instead of stopping at 1100px */
+  max-width: 100% !important; 
+  width: 100%;
+  
+  /* 🌟 Add comfortable side padding so the text doesn't touch the exact edges */
+  padding: 1.5rem 5rem 1rem; 
+  margin: 0;
+  
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  height: 100vh; /* Fills the viewport perfectly */
+  box-sizing: border-box;
+  flex: 1;
+}
+
+/* ── Page Header ── */
+.advisor-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1.2rem; /* 🟢 CHANGED: Tightened from 1.6rem to pull chat higher up */
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.advisor-main-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--teal);
+  margin: 0 0 0.35rem;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.advisor-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  margin: 0;
+  font-weight: 400;
+}
+
+/* ── Status Indicator ── */
+.advisor-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: var(--green-soft);
+  border: 1px solid #b8dfc9;
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  flex-shrink: 0;
+  margin-bottom: 0.3rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.status-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Chat Window ── */
+.chat-window {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.6rem 1.6rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  box-shadow: var(--shadow);
+  scroll-behavior: smooth;
+}
+
+.chat-window::-webkit-scrollbar {
+  width: 5px;
+}
+.chat-window::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-window::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}
+
+/* ── Message Row ── */
+.message-row {
+  display: flex;
+  align-items: flex-start; /* Aligned top for balanced layouts without tail avatars */
+  gap: 0.8rem;
+}
+
+.message-row--user {
+  flex-direction: row-reverse;
+}
+
+/* ── Avatar ── */
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar--assistant {
+  background: var(--teal);
+  color: #fff;
+}
+
+/* ── Bubble ── */
+.bubble {
+  max-width: 75%;
+  padding: 0.9rem 1.2rem;
+  border-radius: var(--radius-md);
+  font-size: 1.05rem; /* Made chat font bigger to align with clean dashboard visibility scales */
+  line-height: 1.6;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.bubble--assistant {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-bottom-left-radius: 4px;
+  color: var(--text-primary);
+}
+
+.bubble--user {
+  background: var(--teal);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.bubble-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word; /* Breaks long words to prevent overflow */
+  word-wrap: break-word;     /* Legacy fallback for older browsers */
+  word-break: break-word;    /* Ensures strict breaking inside the bubble */
+}
+
+/* ── File tag inside bubble ── */
+.bubble-file-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+  color: inherit;
+}
+
+.bubble--assistant .bubble-file-tag {
+  background: var(--teal-light);
+  border-color: #b8d8d8;
+  color: var(--teal);
+}
+
+/* ── Typing indicator ── */
+.bubble--typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1rem 1.3rem;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--teal);
+  border-radius: 50%;
+  display: inline-block;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+  opacity: 0.6;
+}
+
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40%           { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── File Preview Bar (above input) ── */
+.file-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--teal-light);
+  border: 1px solid #b8d8d8;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 1rem;
+  margin-top: 0.8rem;
+  font-size: 0.88rem;
+  color: var(--teal);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.file-preview-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--teal);
+  display: flex;
+  align-items: center;
+  padding: 0.15rem;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.file-preview-remove:hover {
+  opacity: 1;
+  background: #cce8e8;
+}
+
+/* ── Context preview bar (above input) ── */
+.context-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(26, 107, 107, 0.05);
+  border-left: 3px solid var(--teal);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.4rem 0.7rem 0.4rem 0.8rem;
+  margin-bottom: 0.45rem;
+  margin-top: 0;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.context-preview-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.context-preview-text {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.context-preview-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  padding: 0.2rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.context-preview-remove:hover {
+  opacity: 1;
+  color: var(--teal);
+}
+
+/* ── Context quote inside chat bubbles ── */
+.bubble-context-quote {
+  display: block;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.75);
+  border-left: 2.5px solid rgba(255, 255, 255, 0.45);
+  padding: 0.18rem 0.55rem;
+  margin-bottom: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bubble--assistant .bubble-context-quote {
+  color: var(--text-muted);
+  border-left-color: var(--teal);
+  background: rgba(26, 107, 107, 0.06);
+  border-radius: 0 3px 3px 0;
+}
+
+
+/* ── Input Bar ── */
+.input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.7rem;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.7rem 0.7rem 0.7rem 0.85rem;
+  margin-top: 0.6rem;
+  box-shadow: var(--shadow);
+  transition: border-color 0.18s, box-shadow 0.18s;
+  flex-shrink: 0;
+}
+
+.input-bar:focus-within {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(26,107,107,0.08);
+}
+
+/* ── Textarea ── */
+.input-textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 1.05rem; /* Increased to sync with larger text flow */
+  color: var(--text-primary);
+  resize: none;
+  line-height: 1.55;
+  padding: 0.25rem 0;
+  min-height: 24px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.input-textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* ── Input Buttons ── */
+.input-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.18s, transform 0.18s, opacity 0.18s;
+}
+
+.input-btn--attach {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.input-btn--attach:hover {
+  background: #cce8e8;
+  transform: scale(1.04);
+}
+
+.input-btn--send {
+  background: var(--border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.input-btn--send-active {
+  background: var(--teal);
+  color: #fff;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.input-btn--send-active:hover {
+  background: var(--teal-mid);
+  transform: scale(1.04);
+}
+
+/* ── Input Hint ── */
+.input-hint {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0;
+  font-weight: 400;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .advisor-page {
+    padding: 1.2rem 1rem 1rem;
+  }
+  .advisor-main-title {
+    font-size: 2.2rem;
+  }
+  .bubble {
+    max-width: 90%;
+    font-size: 1rem;
+  }
+}

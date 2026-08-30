@@ -1,0 +1,123 @@
+/* ============================================================
+   watchcard.css — Individual Watchlist Card in Side Panel
+   ============================================================ */
+
+.watch-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.13s;
+  gap: 0.5rem;
+  position: relative;
+  user-select: none;
+}
+
+.watch-card:last-child { border-bottom: none; }
+
+.watch-card:hover { background: var(--teal-light); }
+
+.watch-card.active {
+  background: var(--teal-light);
+  border-left: 3px solid var(--teal);
+}
+
+/* Edit mode */
+.watch-card.edit-mode {
+  padding-left: 0.6rem;
+  cursor: default;
+}
+
+.watch-card.edit-mode:hover { background: transparent; }
+
+.watch-card-drag-handle {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: grab;
+  padding: 0 0.15rem;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.watch-card-drag-handle:active { cursor: grabbing; }
+
+.watch-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.watch-card-ticker {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.watch-card-name {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-card-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}
+
+.watch-card-price {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.watch-card-change {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+}
+
+.watch-card-change.positive { background: var(--green-soft); color: var(--green); }
+.watch-card-change.negative { background: var(--red-soft);   color: var(--red);   }
+.watch-card-change.neutral  { background: var(--bg);          color: var(--text-muted); }
+
+/* Delete button (edit mode only) */
+.watch-card-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.watch-card-delete-btn:hover {
+  opacity: 1;
+  background: #fff0f0;
+  color: var(--red);
+}
+
+/* Dragging state */
+.watch-card.dragging {
+  opacity: 0.4;
+  background: var(--teal-light);
+}
+
+.watch-card.drag-over {
+  border-top: 2px solid var(--teal);
+}

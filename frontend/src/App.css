@@ -1,0 +1,100 @@
+nav{
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    left:auto;
+    top:0;
+    position: fixed;
+
+    width: 200px;
+    height: 100%;
+    background-color: var(--teal);
+    gap: 20px;
+    box-shadow: var(--shadow);
+    box-sizing: border-box;
+    z-index: 20;
+    transition: width 0.2s ease, padding 0.2s ease;
+}
+
+nav a{
+    color: var(--teal-light);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 10px 15px;
+    border-radius: var(--radius-md);
+    transition: background-color 0.2s ease, color 0.2s ease;
+
+    /*icon*/
+    gap: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.nav-logout{
+    margin-bottom: 0;
+    margin-top: auto;
+}
+
+.nav-zakat:hover,
+.nav-dashboard:hover,
+.nav-advisor:hover,
+.nav-logout:hover,
+.nav-stocks:hover {
+    background-color: var(--teal-light);
+    color: var(--teal-dark);
+}
+
+/* ── Icon-only mode (used on /stocks page) ── */
+nav.nav-icon-only {
+    width: 60px;
+    padding: 20px 5px;
+}
+
+nav.nav-icon-only a {
+    justify-content: center;
+    padding: 10px 0;
+}
+
+/* Responsive: collapse to icon-only on small screens */
+@media (max-width: 768px) {
+    nav {
+        width: 60px;
+        padding: 20px 5px;
+    }
+
+    nav a {
+        justify-content: center;
+        padding: 10px 0;
+    }
+
+    nav a span {
+        display: none;
+    }
+
+    nav a svg {
+        font-size: 1.2rem;
+    }
+}
+
+/* 
+  Page content offset — push pages right of the nav.
+  The stocks page overrides this because it manages its own layout.
+*/
+.app-container {
+  min-height: 100vh;
+  background-color: var(--bg);
+  box-sizing: border-box;
+  transition: margin 0.2s ease, width 0.2s ease;
+  
+  /* 🌟 Force full layout expansion with correct padding calculation */
+  width: auto; 
+  max-width: 100% !important;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 768px) {
+    .app-container {
+        margin-left: 60px;
+    }
+}

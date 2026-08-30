@@ -1,0 +1,45 @@
+/* ============================================================
+   TextHighlightAsk.css
+   Floating "Ask AI" pill that appears on text selection
+   ============================================================ */
+
+.text-highlight-ask-btn {
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 100;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.38rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(26, 107, 107, 0.28);
+  white-space: nowrap;
+  pointer-events: all;
+
+  animation: highlight-pop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.text-highlight-ask-btn:hover {
+  background: var(--teal-mid);
+  transform: translateX(-50%) scale(1.04);
+}
+
+@keyframes highlight-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.85) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1) translateY(0);
+  }
+}

@@ -1,0 +1,546 @@
+/* ============================================================
+   stocks.css — Stocks Page
+   Inherits design language from shared.css + Zakat.css
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* ── Stocks Page Layout ── */
+.stocks-page {
+  display: flex;
+  width: 100%;       /* Explicitly stretch to fill container */
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+  background: var(--bg);
+  
+}
+
+/* ── Side Panel ── */
+.stocks-sidepanel {
+  width: 220px;
+  min-width: 220px;
+  height: 100vh;
+  background: var(--card-bg);
+  border-right: 1.5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.sidepanel-header {
+  padding: 1.2rem 1.1rem 0.8rem;
+  border-bottom: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.sidepanel-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--teal);
+  margin: 0;
+}
+
+.sidepanel-edit-btn {
+  background: none;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sidepanel-edit-btn:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: var(--teal-light);
+}
+
+.sidepanel-edit-btn.active {
+  background: var(--gold-light);
+  border-color: var(--gold);
+  color: var(--gold-dark);
+}
+
+.sidepanel-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+.sidepanel-list::-webkit-scrollbar { width: 4px; }
+.sidepanel-list::-webkit-scrollbar-track { background: transparent; }
+.sidepanel-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.sidepanel-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.sidepanel-empty-icon {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.4;
+}
+
+/* ── Main Dashboard Area ── */
+.stocks-main {
+  flex: 1;                  
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;              /* ✅ Ditambah: memberi jarak seragam antara kad */
+  overflow-y: auto;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  width: 100%;              
+}
+
+.stock-search-wrap,
+.stock-header-card,
+.stock-chart-card,          /* ✅ Ditambah: agar carta mempunyai lebar 100% sejajar dengan kad lain */
+.stock-details-card,
+.stocks-empty-state {
+  width: 100% !important;     
+  max-width: none !important; 
+  box-sizing: border-box;
+}
+
+.stocks-main::-webkit-scrollbar { width: 6px; }
+.stocks-main::-webkit-scrollbar-track { background: transparent; }
+.stocks-main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
+/* ── Search Bar ── */
+.stock-search-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.stock-search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  transition: border-color 0.18s, box-shadow 0.18s;
+  overflow: hidden;
+}
+
+.stock-search-input-row:focus-within {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(26,107,107,0.09);
+}
+
+.stock-search-icon {
+  padding: 0 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.stock-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0.75rem 0.5rem 0.75rem 0;
+  font-size: 0.92rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+}
+
+.stock-search-input::placeholder { color: var(--text-muted); }
+
+.stock-search-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 0.8rem;
+  color: var(--text-muted);
+  font-size: 1rem;
+  transition: color 0.15s;
+}
+
+.stock-search-clear:hover { color: var(--red); }
+
+/* ── Search Dropdown ── */
+.stock-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(26,107,107,0.13);
+  z-index: 100;
+  overflow: hidden;
+  animation: dropdownOpen 0.18s ease;
+}
+
+@keyframes dropdownOpen {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.search-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.1rem;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-dropdown-item:last-child { border-bottom: none; }
+
+.search-dropdown-item:hover { background: var(--teal-light); }
+
+.search-dropdown-item.loading {
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 1.2rem;
+  cursor: default;
+}
+
+.search-dropdown-item.loading:hover { background: transparent; }
+
+.dropdown-ticker {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--teal);
+  min-width: 60px;
+}
+
+.dropdown-name {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin: 0 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-exchange {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+/* ── Stock Header ── */
+.stock-header-card,
+.stock-chart-card,
+.stock-details-card {
+  width: 100%;
+  max-width: 860px; /* Matches the max-width of your zakat-page */
+  margin: 0 auto;   /* Centers the panels */
+}
+
+.stock-header-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 1.8rem;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.stock-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stock-ticker-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--teal-light);
+  color: var(--teal);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  width: fit-content;
+  margin-bottom: 0.2rem;
+}
+
+.stock-name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.stock-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+
+.stock-price {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 2.4rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stock-price.positive { color: var(--green); }
+.stock-price.negative { color: var(--red); }
+.stock-price.neutral  { color: var(--text-primary); }
+
+.stock-change-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stock-change-pct,
+.stock-change-abs {
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.change-positive { background: var(--green-soft); color: var(--green); }
+.change-negative { background: var(--red-soft);   color: var(--red);   }
+.change-neutral  { background: var(--bg);          color: var(--text-muted); }
+
+/* ── Chart Card ── */
+.stock-chart-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.4rem 1.6rem 1.2rem;
+  box-shadow: var(--shadow);
+}
+
+.chart-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.chart-period-btns {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.chart-period-btn {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.chart-period-btn:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: var(--teal-light);
+}
+
+.chart-period-btn.active {
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+}
+
+.chart-star-btn {
+  background: none;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.chart-star-btn:hover {
+  border-color: var(--gold);
+  color: var(--gold-dark);
+  background: var(--gold-light);
+}
+
+.chart-star-btn.saved {
+  background: var(--gold-light);
+  border-color: var(--gold);
+  color: var(--gold-dark);
+}
+
+.chart-star-icon { font-size: 1rem; }
+
+.chart-highlow-row {
+  display: flex;
+  gap: 1.4rem;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.highlow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.highlow-item strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ── Details Card ── */
+.stock-details-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.4rem 1.8rem;
+  box-shadow: var(--shadow);
+}
+
+.details-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 1.1rem;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.detail-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.detail-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detail-value.loading {
+  background: var(--border);
+  border-radius: 4px;
+  color: transparent;
+  animation: shimmer 1.4s infinite;
+  width: 80px;
+  height: 18px;
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1;   }
+}
+
+/* ── Empty State ── */
+.stocks-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 3rem;
+}
+
+.stocks-empty-icon {
+  font-size: 3rem;
+  opacity: 0.25;
+  margin-bottom: 0.3rem;
+}
+
+.stocks-empty-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.3rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.stocks-empty-sub {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 280px;
+  line-height: 1.6;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .stocks-sidepanel {
+    width: 60px;
+    min-width: 60px;
+  }
+  .sidepanel-title,
+  .sidepanel-edit-btn span,
+  .watch-card-name,
+  .watch-card-exchange { display: none; }
+  .sidepanel-header { justify-content: center; padding: 0.8rem 0; }
+  .sidepanel-edit-btn { padding: 0.25rem; }
+}

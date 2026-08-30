@@ -1,0 +1,287 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* ── Preferences Page Shell ── */
+.pref-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg);
+  padding: 2rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Card ── */
+.pref-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 2.8rem 2.4rem 2.4rem;
+  width: 100%;
+  max-width: 560px;
+  animation: prefFadeIn 0.4s ease;
+}
+
+@keyframes prefFadeIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Header ── */
+.pref-header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.4rem;
+  border-bottom: 2px solid var(--border);
+}
+
+.pref-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--teal);
+  margin: 0 0 0.4rem;
+  letter-spacing: -0.02em;
+}
+
+.pref-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin: 0;
+  font-weight: 400;
+}
+
+/* ── Progress Bar ── */
+.pref-progress-wrap {
+  margin-bottom: 1.8rem;
+}
+
+.pref-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.pref-progress-bar {
+  height: 6px;
+  background: var(--teal-light);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pref-progress-fill {
+  height: 100%;
+  background: var(--teal);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* ── Question Block ── */
+.pref-question {
+  margin-bottom: 1.6rem;
+  animation: prefFadeIn 0.3s ease;
+}
+
+.pref-question-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.pref-question-text {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 1rem;
+}
+
+/* ── Option Chips ── */
+.pref-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.pref-option {
+  padding: 0.55rem 1.1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, color 0.18s;
+}
+
+.pref-option:hover {
+  border-color: var(--teal);
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.pref-option.selected {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+}
+
+/* ── Number / Text Input field variant ── */
+.pref-input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg);
+  transition: border-color 0.18s, background 0.18s;
+}
+
+.pref-input-wrap:focus-within {
+  border-color: var(--teal);
+  background: #fff;
+}
+
+.pref-input-prefix {
+  padding: 0.55rem 0.8rem;
+  background: var(--teal-light);
+  color: var(--teal);
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-right: 1.5px solid var(--border);
+  white-space: nowrap;
+}
+
+.pref-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.92rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-primary);
+}
+
+.pref-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* ── Error Banner ── */
+.pref-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fff0f0;
+  border: 1px solid #f5c6c6;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.83rem;
+  color: var(--red);
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+/* ── Navigation Buttons ── */
+.pref-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1.8rem;
+  gap: 0.8rem;
+}
+
+.pref-btn-back {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 1.4rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s;
+}
+
+.pref-btn-back:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.pref-btn-next {
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 1.8rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background 0.18s, transform 0.15s;
+}
+
+.pref-btn-next:hover {
+  background: var(--teal-mid);
+  transform: translateY(-1px);
+}
+
+.pref-btn-next:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.pref-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Completion Screen ── */
+.pref-complete {
+  text-align: center;
+  padding: 1rem 0;
+  animation: prefFadeIn 0.4s ease;
+}
+
+.pref-complete-icon {
+  font-size: 3.5rem;
+  margin-bottom: 1rem;
+  line-height: 1;
+}
+
+.pref-complete-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.8rem;
+  color: var(--teal);
+  margin: 0 0 0.5rem;
+}
+
+.pref-complete-text {
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  margin: 0 0 1.8rem;
+  line-height: 1.6;
+}
