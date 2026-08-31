@@ -35,13 +35,13 @@ export default function Auth() {
 
   /**
    * Check Firestore whether a user has completed the preference survey.
-   * Returns true  → go to /zakat
+   * Returns true  → go to /dashboard
    * Returns false → go to /preferences
    */
   async function redirectAfterAuth(uid) {
     const snap = await getDoc(doc(db, 'users', uid));
     if (snap.exists() && snap.data().preferencesCompleted) {
-      navigate('/zakat');
+      navigate('/dashboard');
     } else {
       navigate('/preferences');
     }

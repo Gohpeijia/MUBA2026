@@ -299,6 +299,9 @@ def manage_watchlist():
         data = request.json
         secure_user_id = g.uid
         sticker = data.get('sticker', '').upper()
+        # BUG FIX: this was never being read from the payload, so every
+        # watchlist entry was saved with no company name — only a ticker.
+        name = data.get('name', '').strip()
 
         try:
             price = float(data.get('price', 0.0))
@@ -333,12 +336,17 @@ def manage_watchlist():
                 item['changeFromOpen'] = changeFromOpen
                 item['changePercentFromOpen'] = changePercentFromOpen
                 item['marketStatus'] = marketStatus
+                # Only overwrite the stored name if a real one came in — keeps
+                # an existing good name from being wiped by a stray empty call.
+                if name:
+                    item['name'] = name
                 stock_found = True
                 break
 
         if not stock_found:
             watchlist.append({
                 "sticker": sticker,
+                "name": name or sticker,
                 "price": price,
                 "change": change,
                 "changePercent": changePercent,
@@ -394,20 +402,24 @@ def update_profile():
         user_id         = g.uid
         email           = data.get('email', '').strip()
         preference_data = data.get('preference', {})
-        update_payload  = {"profile_complete": False}
+        update_payload  = {"preferencesCompleted": False}
 
         if email:
             update_payload["email"] = email
 
         if preference_data:
             update_payload["preference"] = {
-                "employmentStatus":      preference_data.get('employmentStatus', ''),
-                "monthlyIncome":         float(preference_data.get('monthlyIncome', 0.0)),
-                "investmentExperience":  preference_data.get('investmentExperience', ''),
-                "riskTolerance":         preference_data.get('riskTolerance', ''),
-                "zakatGoal":             preference_data.get('zakatGoal', '')
+                "employmentStatus":     preference_data.get('employmentStatus', ''),
+                "monthlyIncome":        float(preference_data.get('monthlyIncome', 0.0)),
+                "investmentExperience": preference_data.get('investmentExperience', ''),
+                "riskTolerance":        preference_data.get('riskTolerance', ''),
+                "riskCopilotMode":      preference_data.get('riskCopilotMode', ''),
+                "autoHedgingAgent":     preference_data.get('autoHedgingAgent', ''),
+                "primaryGoal":          preference_data.get('primaryGoal', '')
             }
-            update_payload["profile_complete"] = True
+            # This is the flag Auth.jsx's redirectAfterAuth() checks to decide
+            # whether to send a returning user to /preferences or straight in.
+            update_payload["preferencesCompleted"] = True
 
         db.collection('users').document(user_id).set(update_payload, merge=True)
         return jsonify({"success": True, "message": "Preferences safely updated.", "data": update_payload})
@@ -430,9 +442,9 @@ def get_profile():
         return jsonify({
             "success": True,
             "data": {
-                "email":            data.get("email", ""),
-                "preference":       data.get("preference", {}),
-                "profile_complete": data.get("profile_complete", False)
+                "email":                data.get("email", ""),
+                "preference":           data.get("preference", {}),
+                "preferencesCompleted": data.get("preferencesCompleted", False)
             }
         })
 

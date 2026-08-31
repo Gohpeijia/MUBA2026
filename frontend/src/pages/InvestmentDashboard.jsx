@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -25,6 +25,57 @@ const fmtRM = (value) =>
     style: "currency",
     currency: "MYR",
   }).format(value);
+
+// Local-calendar-day key (not UTC) so trades made late at night still land
+// in the day the user actually sees them on.
+const dayKey = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
+// 'YYYY-MM-DD' in local time, matching the format <input type="date"> uses,
+// so a trade's timestamp can be compared directly against the picker value.
+const toDateInputValue = (ts) => {
+  const d = new Date(ts);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+};
+
+// Short display label for a 'YYYY-MM-DD' picker value, e.g. "15 Aug 2026".
+const fmtPickerDate = (dateStr) =>
+  new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const isSameDay = (a, b) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+const dayLabel = (ts) => {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (isSameDay(d, today)) return 'Today';
+  if (isSameDay(d, yesterday)) return 'Yesterday';
+  return fmtDate(ts);
+};
+
+// Buckets an already-sorted trade list into { key, label, trades[] } groups,
+// preserving the incoming order (so newest-first stays newest-first).
+function groupTradesByDay(sortedTradeList) {
+  const groups = [];
+  const byKey = new Map();
+  for (const t of sortedTradeList) {
+    const key = dayKey(t.timestamp);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: dayLabel(t.timestamp), trades: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.trades.push(t);
+  }
+  return groups;
+}
 
 /*
  * Derive per-ticker holdings + realized P&L from a flat trade log,
@@ -134,6 +185,10 @@ export default function InvestmentDashboard({ userName }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // all | buy | sell
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const dateFilterRef = useRef(null);
 
   const fetchData = useCallback(async () => {
     const user = auth.currentUser;
@@ -181,6 +236,17 @@ export default function InvestmentDashboard({ userName }) {
     return () => window.removeEventListener('focus', onFocus);
   }, [fetchData]);
 
+  useEffect(() => {
+    if (!showDatePicker) return;
+    const onClickOutside = (e) => {
+      if (dateFilterRef.current && !dateFilterRef.current.contains(e.target)) {
+        setShowDatePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [showDatePicker]);
+
   const holdings = useMemo(() => computeHoldings(trades, currentPrices), [trades, currentPrices]);
 
   const openHoldings = holdings.filter((h) => h.qty > 0).sort((a, b) => b.marketValue - a.marketValue);
@@ -196,9 +262,31 @@ export default function InvestmentDashboard({ userName }) {
     () =>
       [...trades]
         .filter((t) => filter === 'all' || t.action === filter)
+        .filter((t) => {
+          if (!dateFrom && !dateTo) return true;
+          const d = toDateInputValue(t.timestamp);
+          if (dateFrom && d < dateFrom) return false;
+          if (dateTo && d > dateTo) return false;
+          return true;
+        })
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
-    [trades, filter]
+    [trades, filter, dateFrom, dateTo]
   );
+
+  const clearDateFilter = () => {
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const dateFilterLabel = dateFrom && dateTo
+    ? `${fmtPickerDate(dateFrom)} – ${fmtPickerDate(dateTo)}`
+    : dateFrom
+    ? `From ${fmtPickerDate(dateFrom)}`
+    : dateTo
+    ? `Until ${fmtPickerDate(dateTo)}`
+    : 'Filter by date';
+
+  const groupedTrades = useMemo(() => groupTradesByDay(sortedTrades), [sortedTrades]);
 
   if (loading) {
     return (
@@ -259,40 +347,109 @@ export default function InvestmentDashboard({ userName }) {
               <span className="inv-icon-badge">🤖</span>
               <span className="card-label" style={{ margin: 0 }}>Trade History</span>
             </div>
-            <div className="trade-filter-group">
-              {['all', 'buy', 'sell'].map((f) => (
+            <div className="trade-filters-right">
+              <div className="trade-filter-group">
+                {['all', 'buy', 'sell'].map((f) => (
+                  <button
+                    key={f}
+                    className={`trade-filter-btn ${filter === f ? 'active' : ''}`}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f === 'all' ? 'All' : f === 'buy' ? 'Buys' : 'Sells'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="date-filter-wrap" ref={dateFilterRef}>
                 <button
-                  key={f}
-                  className={`trade-filter-btn ${filter === f ? 'active' : ''}`}
-                  onClick={() => setFilter(f)}
+                  type="button"
+                  className={`date-filter-btn ${dateFrom || dateTo ? 'active' : ''}`}
+                  onClick={() => setShowDatePicker((v) => !v)}
                 >
-                  {f === 'all' ? 'All' : f === 'buy' ? 'Buys' : 'Sells'}
+                  <span className="date-filter-icon">📅</span>
+                  {dateFilterLabel}
                 </button>
-              ))}
+
+                {showDatePicker && (
+                  <div className="date-filter-dropdown">
+                    <div className="date-filter-field">
+                      <label htmlFor="inv-date-from">From</label>
+                      <input
+                        id="inv-date-from"
+                        type="date"
+                        value={dateFrom}
+                        max={dateTo || undefined}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                      />
+                    </div>
+                    <div className="date-filter-field">
+                      <label htmlFor="inv-date-to">To</label>
+                      <input
+                        id="inv-date-to"
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(e) => setDateTo(e.target.value)}
+                      />
+                    </div>
+                    <div className="date-filter-actions">
+                      <button
+                        type="button"
+                        className="date-filter-clear"
+                        onClick={clearDateFilter}
+                        disabled={!dateFrom && !dateTo}
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        className="date-filter-apply"
+                        onClick={() => setShowDatePicker(false)}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {sortedTrades.length === 0 ? (
-            <p className="inv-card-sub">No trades logged yet.</p>
+            <p className="inv-card-sub">
+              {dateFrom || dateTo || filter !== 'all' ? 'No trades match this filter.' : 'No trades logged yet.'}
+            </p>
           ) : (
-            <div className="trade-list">
-              {sortedTrades.map((t) => {
-                const total = (parseFloat(t.quantity) || 0) * (parseFloat(t.price) || 0);
-                return (
-                  <div className="trade-row" key={t.id}>
-                    <ActionBadge action={t.action} />
-                    <div className="trade-row-main">
-                      <span className="trade-row-ticker">{t.ticker}</span>
-                      <span className="trade-row-detail">{t.quantity} sh @ {fmtUSD(t.price)}</span>
-                    </div>
-                    <div className="trade-row-right">
-                      <span className="trade-row-total">{fmtUSD(total)}</span>
-                      <span className="trade-row-date">{fmtDate(t.timestamp)}</span>
-                    </div>
-                    {t.reason && <p className="trade-row-reason">{t.reason}</p>}
+            <div className="trade-day-groups">
+              {groupedTrades.map((group) => (
+                <div className="trade-day-group" key={group.key}>
+                  <div className="trade-day-header">
+                    <span className="trade-day-label">{group.label}</span>
+                    <span className="trade-day-count">
+                      {group.trades.length} trade{group.trades.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
-                );
-              })}
+                  <div className="trade-list">
+                    {group.trades.map((t) => {
+                      const total = (parseFloat(t.quantity) || 0) * (parseFloat(t.price) || 0);
+                      return (
+                        <div className="trade-row" key={t.id}>
+                          <ActionBadge action={t.action} />
+                          <div className="trade-row-main">
+                            <span className="trade-row-ticker">{t.ticker}</span>
+                            <span className="trade-row-detail">{t.quantity} sh @ {fmtUSD(t.price)}</span>
+                          </div>
+                          <div className="trade-row-right">
+                            <span className="trade-row-total">{fmtUSD(total)}</span>
+                            <span className="trade-row-date">{fmtDate(t.timestamp)}</span>
+                          </div>
+                          {t.reason && <p className="trade-row-reason">{t.reason}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>

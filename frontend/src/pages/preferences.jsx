@@ -151,7 +151,7 @@ export default function Preferences() {
       }
 
       setDone(true);
-      setTimeout(() => navigate('/risk-copilot'), 2000);
+      setTimeout(() => navigate('/dashboard'), 2000);
 
     } catch (err) {
       // Catch backend errors or network errors safely

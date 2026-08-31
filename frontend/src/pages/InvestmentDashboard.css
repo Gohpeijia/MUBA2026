@@ -246,6 +246,13 @@
 }
 
 /* ── Trade filter buttons ── */
+.trade-filters-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .trade-filter-group {
   display: flex;
   gap: 0.4rem;
@@ -275,12 +282,178 @@
   color: #fff;
 }
 
-/* ── Trade history list ── */
+/* ── Date range filter dropdown ── */
+.date-filter-wrap {
+  position: relative;
+}
+
+.date-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.date-filter-btn:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.date-filter-btn.active {
+  background: var(--teal-light, #e6f1f1);
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.date-filter-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.date-filter-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow-hover, 0 8px 24px rgba(0,0,0,0.12));
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 220px;
+}
+
+.date-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.date-filter-field label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.date-filter-field input[type="date"] {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm, 7px);
+  padding: 0.4rem 0.5rem;
+  background: var(--bg, #f4f7f7);
+}
+
+.date-filter-field input[type="date"]:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+
+.date-filter-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.1rem;
+}
+
+.date-filter-clear,
+.date-filter-apply {
+  flex: 1;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  transition: all 0.15s ease;
+}
+
+.date-filter-clear {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text-muted);
+}
+
+.date-filter-clear:hover:not(:disabled) {
+  border-color: var(--red, #c0392b);
+  color: var(--red, #c0392b);
+}
+
+.date-filter-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.date-filter-apply {
+  background: var(--teal);
+  border: 1.5px solid var(--teal);
+  color: #fff;
+}
+
+.date-filter-apply:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 700px) {
+  .date-filter-dropdown {
+    right: auto;
+    left: 0;
+  }
+}
+
+/* ── Trade history, grouped by day ── */
+.trade-day-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  margin-top: 0.6rem;
+}
+
+.trade-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.trade-day-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.trade-day-label {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--teal);
+}
+
+.trade-day-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
 .trade-list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-top: 0.6rem;
 }
 
 .trade-row {
