@@ -1,6 +1,7 @@
 # finnhub_service.py
 import os
 import time
+import math
 import requests
 import yfinance as yf
 import time
@@ -52,7 +53,7 @@ def get_rich_market_quote(ticker: str) -> dict:
         change_from_open = current_price - open_price
         change_percent_open = (change_from_open / open_price) * 100 if open_price else 0
 
-        return {
+        result = {
             "price": round(current_price, 2),
             "change": round(change, 2),
             "changePercent": round(change_percent, 2),
@@ -64,6 +65,16 @@ def get_rich_market_quote(ticker: str) -> dict:
             "open": round(open_price, 2),
             "previousClose": round(previous_close, 2)
         }
+
+        # Same NaN-breaks-JSON issue as the chart endpoint — a missing
+        # Yahoo field can leave one of these as NaN, which is not valid
+        # JSON and would break the entire /details response for this
+        # ticker rather than just the one field.
+        if any(isinstance(v, float) and math.isnan(v) for v in result.values()):
+            print(f"❌ [Yahoo Finance] Quote for {ticker} had a NaN field, discarding")
+            return None
+
+        return result
     except Exception as e:
         print(f"❌ [Yahoo Finance] Quote Error for {ticker}: {e}")
         return None
@@ -86,7 +97,7 @@ def get_company_fundamentals(ticker: str) -> dict:
         debt_equity = info.get('debtToEquity', 0)
 
         # Grab all the new info we need
-        return {
+        result = {
             "name": info.get('shortName') or info.get('longName') or ticker,
             "exchange": info.get('exchange', 'US'),
             "peRatio": round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else None,
@@ -104,6 +115,17 @@ def get_company_fundamentals(ticker: str) -> dict:
             "fiftyTwoWeekLow": info.get('fiftyTwoWeekLow', None),
             "lotSize": 100 # Standard size for US/Bursa markets
         }
+
+        # NaN is truthy in Python (bool(float('nan')) is True), so it can
+        # slip past the "if info.get(...)" checks above and end up in the
+        # response. json.dumps then emits a bare `NaN` token, which is not
+        # valid JSON and breaks parsing on the frontend. Swap any NaN for
+        # None so the response is always well-formed.
+        for key, val in result.items():
+            if isinstance(val, float) and math.isnan(val):
+                result[key] = None
+
+        return result
     except Exception as e:
         print(f"❌ [Yahoo Finance] Fundamental Error for {ticker}: {e}")
         return {"name": ticker, "peRatio": 0, "marketCap": 0, "netProfitMargin": 0, "debtToEquity": 0}
@@ -123,15 +145,24 @@ def get_historical_candles(ticker: str, timeframe: str = '1M') -> list:
         # 3. Format the data for your React frontend
         candles = []
         for date, row in hist.iterrows():
+            close = row['Close']
+            # A gap in Yahoo's data (holiday, partial candle, etc.) can come
+            # back as NaN. Python's json module serializes that as the bare
+            # literal `NaN`, which is not valid JSON — it silently breaks
+            # the ENTIRE chart response client-side (JSON.parse throws on
+            # the whole payload, not just the bad point). Skip it instead.
+            if close is None or math.isnan(close):
+                continue
+
             # If it's intraday (1D or 1W), show the time. Otherwise, just the date.
             if timeframe in ['1D', '1W']:
                 date_str = date.strftime('%Y-%m-%d %H:%M')
             else:
                 date_str = date.strftime('%Y-%m-%d')
-                
+
             candles.append({
                 "date": date_str,
-                "value": round(row['Close'], 2)
+                "value": round(close, 2)
             })
             
         return candles

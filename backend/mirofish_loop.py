@@ -21,7 +21,7 @@ class SwarmSimulationEngine:
         elif self.openrouter_key:
             self.api_key = self.openrouter_key
             self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-            self.model = "xai/grok-2-1212"
+            self.model = "meta-llama/llama-3.3-70b-instruct"
         elif self.gemini_key:
             self.api_key = self.gemini_key
             self.api_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"

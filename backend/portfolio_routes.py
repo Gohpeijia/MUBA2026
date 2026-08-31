@@ -7,12 +7,34 @@ from finnhub_service import (
     get_company_fundamentals,
     get_historical_candles,
 )
+from Risk_sizing import check_risk_limits
 import os
 import time
 import requests
 from datetime import datetime, timedelta
 
 portfolio_bp = Blueprint('portfolio', __name__)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  INTERNAL HELPER — flat, timestamped trade log
+#  Written to users/{uid}/trades — separate from the aggregated `portfolio`
+#  array, which only tracks current total shares per ticker and has no
+#  concept of individual transactions.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _record_trade(user_id: str, ticker: str, action: str, quantity: float,
+                   price: float, company_name: str = '', reason: str = ''):
+    """Appends one entry to the user's flat trade log."""
+    db.collection('users').document(user_id).collection('trades').add({
+        "ticker":      ticker,
+        "action":      action,          # 'buy' | 'sell'
+        "quantity":    quantity,
+        "price":       price,
+        "companyName": company_name,
+        "reason":      reason,
+        "timestamp":   datetime.now().isoformat(),
+    })
 
 FINNHUB_KEY = os.getenv('FINNHUB_API_KEY')
 
@@ -245,12 +267,23 @@ def buy_stock():
         except ValueError:
             return jsonify({"success": False, "error": "Shares must be a valid number"}), 400
 
+        # Price paid per share for THIS transaction — required for the trade
+        # log's cost-basis math (the aggregated `portfolio` array below has
+        # no per-transaction price, only a running share count).
+        try:
+            price = float(data.get('price', 0.0))
+        except ValueError:
+            return jsonify({"success": False, "error": "Price must be a valid number"}), 400
+
+        reason    = data.get('reason', '').strip()
         fields    = data.get('fields', {})
         chart     = data.get('chart', {})
         watchlist = bool(data.get('watchlist', False))
 
         if not sticker or shares <= 0:
             return jsonify({"success": False, "error": "Sticker is required and shares must be > 0."}), 400
+        if price <= 0:
+            return jsonify({"success": False, "error": "Price is required and must be > 0."}), 400
 
         user_ref = db.collection('users').document(secure_user_id)
         user_doc = user_ref.get()
@@ -258,11 +291,46 @@ def buy_stock():
         if not user_doc.exists:
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        portfolio   = user_doc.to_dict().get('portfolio', [])
+        user_data = user_doc.to_dict()
+        portfolio = user_data.get('portfolio', [])
+        
+        # ── START: DOUBLE-GATE RISK CHECK ──────────────────────────────
+        preferences = user_data.get('preference', {})
+        risk_tolerance = preferences.get('riskTolerance', 'Moderate')
+        total_portfolio_value = float(data.get('totalPortfolioValue', 0.0))
+        
+        # Calculate existing exposure for this specific ticker
+        existing_shares = 0
+        for item in portfolio:
+            if item.get('sticker') == sticker:
+                existing_shares = item.get('shares', 0)
+                break
+                
+        existing_exposure = existing_shares * price
+        proposed_investment = shares * price
+        
+        # Run the mathematical gate
+        risk_check = check_risk_limits(
+            portfolio_value = total_portfolio_value,
+            proposed_investment_amount = proposed_investment,
+            existing_exposure_value = existing_exposure,
+            risk_tolerance = risk_tolerance,
+            open_ai_risk_value = 0.0  # Optional: Update if you track total open risk across all positions
+        )
+        
+        if not risk_check["is_approved"]:
+            return jsonify({
+                "success": False, 
+                "error": f"Trade rejected by risk management: {risk_check['reason']}"
+            }), 403
+        # ── END: DOUBLE-GATE RISK CHECK ────────────────────────────────
+
+        # If approved, proceed with the original portfolio update logic
         stock_found = False
 
         for item in portfolio:
             if item.get('sticker') == sticker:
+                item['shares']    += shares
                 item['shares']    += shares
                 item['name']       = name
                 item['fields']     = fields
@@ -286,7 +354,132 @@ def buy_stock():
             update_payload["totalPortfolioValue"] = float(data.get('totalPortfolioValue', 0.0))
 
         user_ref.update(update_payload)
+
+        _record_trade(
+            user_id      = secure_user_id,
+            ticker       = sticker,
+            action       = 'buy',
+            quantity     = shares,
+            price        = price,
+            company_name = name,
+            reason       = reason,
+        )
+
         return jsonify({"success": True, "message": f"Successfully updated portfolio for {sticker}!"})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  POST /sell  —  reduce (or close) a holding + log the trade
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@portfolio_bp.route('/sell', methods=['POST'])
+@require_auth
+def sell_stock():
+    try:
+        data           = request.json
+        secure_user_id = g.uid
+        sticker        = data.get('sticker', '').upper()
+
+        try:
+            shares = int(data.get('shares', 0))
+        except ValueError:
+            return jsonify({"success": False, "error": "Shares must be a valid number"}), 400
+
+        try:
+            price = float(data.get('price', 0.0))
+        except ValueError:
+            return jsonify({"success": False, "error": "Price must be a valid number"}), 400
+
+        reason = data.get('reason', '').strip()
+
+        if not sticker or shares <= 0:
+            return jsonify({"success": False, "error": "Sticker is required and shares must be > 0."}), 400
+        if price <= 0:
+            return jsonify({"success": False, "error": "Price is required and must be > 0."}), 400
+
+        user_ref = db.collection('users').document(secure_user_id)
+        user_doc = user_ref.get()
+
+        if not user_doc.exists:
+            return jsonify({"success": False, "error": "User not found"}), 404
+
+        portfolio   = user_doc.to_dict().get('portfolio', [])
+        holding     = next((item for item in portfolio if item.get('sticker') == sticker), None)
+
+        if holding is None or holding.get('shares', 0) <= 0:
+            return jsonify({"success": False, "error": f"You don't hold any {sticker} to sell."}), 400
+
+        if shares > holding.get('shares', 0):
+            return jsonify({
+                "success": False,
+                "error": f"You only hold {holding.get('shares', 0)} shares of {sticker}."
+            }), 400
+
+        company_name = holding.get('name', sticker)
+        holding['shares'] -= shares
+
+        # Drop the holding entirely once it's fully sold, rather than
+        # leaving a zero-share entry sitting in the portfolio array.
+        if holding['shares'] <= 0:
+            portfolio = [item for item in portfolio if item.get('sticker') != sticker]
+
+        user_ref.update({"portfolio": portfolio})
+
+        _record_trade(
+            user_id      = secure_user_id,
+            ticker       = sticker,
+            action       = 'sell',
+            quantity     = shares,
+            price        = price,
+            company_name = company_name,
+            reason       = reason,
+        )
+
+        return jsonify({"success": True, "message": f"Successfully sold {shares} share(s) of {sticker}!"})
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  GET /trades  —  flat trade log for InvestmentDashboard.jsx
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@portfolio_bp.route('/trades', methods=['GET'])
+@require_auth
+def get_trades():
+    try:
+        secure_user_id = g.uid
+
+        docs = (
+            db.collection('users')
+              .document(secure_user_id)
+              .collection('trades')
+              .order_by('timestamp')
+              .get()
+        )
+
+        trades = [
+            {
+                "id":          d.id,
+                "ticker":      d.get("ticker"),
+                "action":      d.get("action"),
+                "quantity":    d.get("quantity"),
+                "price":       d.get("price"),
+                "companyName": d.get("companyName"),
+                "reason":      d.get("reason"),
+                "timestamp":   d.get("timestamp"),
+            }
+            for d in docs
+        ]
+
+        return jsonify({
+            "success": True,
+            "data": {"trades": trades}
+        })
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

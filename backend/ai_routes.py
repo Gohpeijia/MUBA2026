@@ -89,6 +89,15 @@ def chat_with_agent():
         preferences  = _get_preferences(user_id)
         tabung_goal  = user_data.get("tabung_goal", None)
 
+        # ── START NEW: Fetch Portfolio Data ──
+        portfolio_doc = db.collection("users").document(user_id).collection("portfolio").document("summary").get()
+        portfolio_data = portfolio_doc.to_dict() if portfolio_doc.exists else {
+            "total_value": 0.0,
+            "positions": {},
+            "open_ai_risk_value": 0.0
+        }
+        # ── END NEW ──
+
         # 2. Extract chat history directly from frontend payload instead of Firestore
         chat_history = data.get('chat_history', [])
         
@@ -103,7 +112,8 @@ def chat_with_agent():
             chat_history = chat_history,
             page_context = page_context,
             preferences  = preferences,
-            user_goal    = tabung_goal
+            user_goal    = tabung_goal,
+            portfolio    = portfolio_data
         )
 
         if result.get("status") == "ERROR":

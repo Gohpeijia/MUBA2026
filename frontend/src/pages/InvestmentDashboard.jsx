@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import axios from 'axios';
 import { auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { useAIAdvisor } from './AIAdvisorContext'
 import './InvestmentDashboard.css';
 
 const API_BASE = 'http://127.0.0.1:5000/api';
@@ -178,8 +179,104 @@ function HoldingCard({ h }) {
   );
 }
 
+function TradeProposalModal({ proposal, onClose, onSuccess }) {
+  const [executing, setExecuting] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (!proposal) return null;
+
+  const handleExecute = async () => {
+    setExecuting(true);
+    setError(null);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('User not authenticated');
+      const token = await user.getIdToken();
+
+      const isBuy = (proposal.action || 'buy').toLowerCase() === 'buy';
+      const endpoint = `${API_BASE}/stocks/portfolio/${isBuy ? 'buy' : 'sell'}`;
+
+      const res = await axios.post(
+        endpoint,
+        {
+          ticker: proposal.ticker,
+          shares: proposal.recommended_shares,
+          price: proposal.current_price,
+          reason: proposal.reason || 'AI Swarm Executed Trade'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data.success) {
+        onSuccess();
+        onClose();
+      } else {
+        setError(res.data.error || 'Execution failed.');
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Execution failed.');
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-card">
+        <h3>Confirm AI Trade Recommendation</h3>
+        <p className="modal-subtitle">The AI Swarm and Risk Gate have prepared the following execution parameters:</p>
+        
+        <div className="modal-details">
+          <div className="modal-row">
+            <span>Action:</span>
+            <strong className={`trade-badge trade-badge--${proposal.action?.toLowerCase()}`}>
+              {proposal.action?.toUpperCase()}
+            </strong>
+          </div>
+          <div className="modal-row">
+            <span>Ticker:</span>
+            <strong>{proposal.ticker}</strong>
+          </div>
+          <div className="modal-row">
+            <span>Recommended Shares:</span>
+            <strong>{proposal.recommended_shares}</strong>
+          </div>
+          <div className="modal-row">
+            <span>Market Price:</span>
+            <strong>{fmtUSD(proposal.current_price)}</strong>
+          </div>
+          {proposal.stop_loss_price && (
+            <div className="modal-row">
+              <span>Stop Loss Price:</span>
+              <strong>{fmtUSD(proposal.stop_loss_price)}</strong>
+            </div>
+          )}
+          {proposal.capped_by && (
+            <div className="modal-row modal-row--warning">
+              <span>Risk Gate Constraint:</span>
+              <span>{proposal.capped_by}</span>
+            </div>
+          )}
+        </div>
+
+        {error && <p className="modal-error">{error}</p>}
+
+        <div className="modal-actions">
+          <button className="btn-secondary" onClick={onClose} disabled={executing}>
+            Dismiss
+          </button>
+          <button className="btn-primary" onClick={handleExecute} disabled={executing}>
+            {executing ? 'Executing...' : 'Approve Trade'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Dashboard ── */
 export default function InvestmentDashboard({ userName }) {
+  const { pendingTrade, setPendingTrade } = useAIAdvisor();
   const [trades, setTrades] = useState([]);
   const [currentPrices, setCurrentPrices] = useState({});
   const [loading, setLoading] = useState(true);
@@ -198,7 +295,7 @@ export default function InvestmentDashboard({ userName }) {
       const token = await user.getIdToken();
       const headers = { Authorization: `Bearer ${token}` };
 
-      const tradesRes = await axios.get(`${API_BASE}/trades`, { headers });
+      const tradesRes = await axios.get(`${API_BASE}/stocks/portfolio/trades`, { headers });
       const tradeList = tradesRes.data.success ? tradesRes.data.data.trades || [] : [];
       setTrades(tradeList);
 
@@ -455,6 +552,16 @@ export default function InvestmentDashboard({ userName }) {
         </section>
 
       </div>
+
+      {/* Place the trade execution modal right here */}
+      {pendingTrade && (
+        <TradeProposalModal
+          proposal={pendingTrade}
+          onClose={() => setPendingTrade(null)}
+          onSuccess={fetchData}
+        />
+      )}
+
     </div>
   );
 }

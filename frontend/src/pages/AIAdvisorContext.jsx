@@ -6,7 +6,7 @@ const AIAdvisorContext = createContext(null);
 const INITIAL_MESSAGES = [
   {
     role: 'assistant',
-    content: 'Assalamualaikum. Saya AI Penasihat Shariah anda.',
+    content: "Hi, I'm your personal AI agent trader.",
   },
 ];
 
@@ -18,6 +18,7 @@ export function AIAdvisorProvider({ children }) {
   });
   const [loading, setLoading]   = useState(false);
   const [highlightedContext, setHighlightedContext] = useState(null);
+  const [pendingTrade, setPendingTrade] = useState(null);
 
   const [conversationId] = useState(() => {
     return new Date().toISOString().split('T')[0]; 
@@ -61,7 +62,8 @@ export function AIAdvisorProvider({ children }) {
       conversationId,
       { text, fileData, fileName, highlightedText: textContextSnapshot, chatHistory: updatedHistory },
       setMessages,
-      setLoading
+      setLoading,
+      setPendingTrade
     );
     
   }, [conversationId, highlightedContext, messages]);
@@ -131,8 +133,15 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
         throw new Error(data.error || 'Server error');
     }
 
-    if (data.success && data.data && data.data.final_advice) {
-      setMessages(prev => [...prev, { role: 'assistant', content: data.data.final_advice }]);
+    if (data.success && data.data) {
+      if (data.data.final_advice) {
+        setMessages(prev => [...prev, { role: 'assistant', content: data.data.final_advice }]);
+      }
+      
+      // Extract trade proposal when backend risk analysis outputs execution recommendation
+      if (data.data.trade_proposal) {
+        setPendingTrade(data.data.trade_proposal);
+      }
     } else {
       throw new Error("Invalid response format from server.");
     }

@@ -17,8 +17,13 @@ from shariah_filter import shariahfilter
 from mirofish_loop import SwarmSimulationEngine
 from consensus_engine import calculate_swarm_consensus
 from news_fetcher import bina_data_kuantitatif, format_data_untuk_prompt
+from Risk_sizing import calculate_position_size
+from thetanuts_trader import ThetanutsTrader
+
+trader = ThetanutsTrader()
 
 load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 
 
@@ -72,7 +77,7 @@ class AIAgent:
                 "name":    "Qwen (OpenRouter)",
                 "url":     "https://openrouter.ai/api/v1/chat/completions",
                 "headers": {"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
-                "model":   "qwen/qwen-2.5-72b-instruct",
+                "model":   "qwen/qwen-2.5-72b-instruct:free",
             })
 
         if gemini_key:
@@ -100,6 +105,7 @@ class AIAgent:
         preferences:        dict = None,
         previous_consensus: dict = None,
         user_goal:          dict = None,
+        portfolio:          dict = None,
     ):
         # ── Auto-detect ticker ────────────────────────────────────────────────
         if not ticker:
@@ -108,7 +114,7 @@ class AIAgent:
                 match = re.search(r'\b([A-Z0-9]+\.KL)\b', page_context.upper())
             if match:
                 ticker = match.group(1)
-                print(f"🔍 Ticker dikesan: {ticker}")
+                print(f"🔍 Ticker detected: {ticker}")
 
         if previous_consensus is None and ticker:
             previous_consensus = self._consensus_history.get(ticker)
@@ -135,6 +141,7 @@ class AIAgent:
         #              jika ada ticker, ambil data kuantitatif DULU, baru swarm
 
         structured_consensus = None  # ← nilai lalai untuk soalan am
+        trade_proposal       = None
         kuantitatif          = {
             "is_compliant": is_compliant,
             "reason":       reason,
@@ -157,10 +164,10 @@ class AIAgent:
                     loop.close()
 
                 blok_data_pasaran = format_data_untuk_prompt(kuantitatif)
-                print(f"✅ Data kuantitatif berjaya diambil untuk {ticker}")
+                print(f"✅ Quantitative data successfully retrieved for {ticker}")
 
             except Exception as e:
-                print(f"⚠️ Gagal ambil data kuantitatif: {e}")
+                print(f"⚠️ Failed to retrieve quantitative data: {e}")
                 # Fallback ke dict asas jika gagal
                 kuantitatif = {
                     "is_compliant": is_compliant,
@@ -214,13 +221,71 @@ class AIAgent:
                     previous_consensus=previous_consensus,
                 )
                 print(
-                    f"📊 Konsensus Swarm: {structured_consensus['consensus']} "
-                    f"pada {structured_consensus['confidence']}%"
+                    f"📊 Swarm Consensus: {structured_consensus['consensus']} "
+                    f"at {structured_consensus['confidence']}%"
                 )
                 self._consensus_history[ticker] = structured_consensus
 
+                # ── START: RISK SIZING & THETANUTS ON-CHAIN TRADING ────────────────
+                consensus_action = structured_consensus.get("consensus", "").upper()
+                confidence = structured_consensus.get("confidence", 0)
+
+                # 1. Calculate Risk / Position Size if portfolio provided
+                if portfolio and consensus_action in ["BUY", "SELL"]:
+                    prefs = preferences or {}
+                    entry_price = kuantitatif.get("harga_semasa", 0.0)
+                    if entry_price > 0:
+                        trade_proposal = calculate_position_size(
+                            portfolio_value = portfolio.get("total_value", 0.0),
+                            entry_price = entry_price,
+                            risk_tolerance = prefs.get("riskTolerance", "Moderate"),
+                            stop_loss_price = None,
+                            existing_exposure_value = portfolio.get("positions", {}).get(ticker, {}).get("market_value", 0.0),
+                            open_ai_risk_value = portfolio.get("open_ai_risk_value", 0.0),
+                            direction = consensus_action
+                        )
+                        print(f"📐 Suggested Size: {trade_proposal.get('recommended_shares', 0)} shares")
+
+                # 2. Trigger Real On-Chain Options Trade if High Confidence BUY/SELL
+                if consensus_action in ["BUY", "SELL"] and confidence >= 50:
+                    print(f"🚀 [Thetanuts] Executing {consensus_action} order on Base Mainnet...")
+                    
+                    # Fetch live orders from OptionBook
+                    orders = trader.get_live_orders()
+                    
+                    if isinstance(orders, list) and len(orders) > 0:
+                        target_order = orders[0]  # Select top matching order
+                        order_id = target_order.get("id", target_order.get("orderHash"))
+                        
+                        # Execute fill (1 USDC fill)
+                        # Set dry_run=True during testing, dry_run=False for live hackathon trade
+                        execution_result = trader.execute_fill(
+                            order_id=order_id,
+                            amount=1.0, 
+                            dry_run=False
+                        )
+                        
+                        # Store result into trade_proposal to pass back to UI
+                        if not trade_proposal:
+                            trade_proposal = {}
+                        trade_proposal["thetanuts_execution"] = {
+                            "status": "SUCCESS",
+                            "order_id": order_id,
+                            "raw_response": execution_result
+                        }
+                        print(f"✅ [Thetanuts] Trade executed: {execution_result}")
+                    else:
+                        print("⚠️ [Thetanuts] No active orders available on OptionBook to fill.")
+                        if not trade_proposal:
+                            trade_proposal = {}
+                        trade_proposal["thetanuts_execution"] = {
+                            "status": "FAILED",
+                            "reason": "No active orders on OptionBook"
+                        }
+                # ── END: RISK SIZING LOGIC ───────────────────────────────
+
             except Exception as e:
-                print(f"⚠️ Swarm gagal: {e}")
+                print(f"⚠️ AI Swarm failed: {e}")
                 structured_consensus = None
 
         else:
@@ -241,9 +306,10 @@ class AIAgent:
             prompt_content,
             chat_history,
             kuantitatif,
+            trade_proposal
         )
 
-    def build_final_response(self, system_prompt, prompt_content, chat_history, shariah_result):
+    def build_final_response(self, system_prompt, prompt_content, chat_history, shariah_result, trade_proposal):
         messages = [{"role": "system", "content": system_prompt}]
 
         if chat_history:
@@ -257,7 +323,7 @@ class AIAgent:
 
         for provider in self.providers:
             try:
-                print(f"🌐 [AIAgent] Menghantar ke: {provider['name']}...")
+                print(f"🌐 [AIAgent] Send to: {provider['name']}...")
 
                 payload = {
                     "model":       provider["model"],
@@ -282,16 +348,17 @@ class AIAgent:
                 if not final_advice:
                     raise ValueError("Content blocked or missing in response (likely AI safety filter).")
 
-                print(f"✅ [AIAgent] Berjaya melalui {provider['name']}")
+                print(f"✅ [AIAgent] Successfully passed through {provider['name']}")
 
                 return {
                     "status":       "SUCCESS",
                     "final_advice": final_advice,
                     "raw_data":     {"shariah_status": shariah_result},
+                    "trade_proposal": trade_proposal
                 }
 
             except Exception as e:
-                err_msg = f"{provider['name']} gagal: {str(e)}"
+                err_msg = f"{provider['name']} failed: {str(e)}"
                 print(f"❌ [AIAgent] {err_msg}")
                 errors.append(err_msg)
                 time.sleep(1)
