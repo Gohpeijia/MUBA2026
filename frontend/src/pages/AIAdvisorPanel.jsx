@@ -1,10 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FaRobot, FaPaperPlane, FaPaperclip, FaTimes, FaFileAlt, FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 import { useAIAdvisor } from './AIAdvisorContext';
+import WalletBalance from './WalletBalance';
+import TradeResultCard from './Traderesultcard';
 import './AIAdvisorPanel.css';
 
 export default function AIAdvisorPanel({ pendingText, onClearPending }) {
-  const { messages, loading, sendMessage, highlightedContext, setHighlightedContext } = useAIAdvisor();
+  const {
+    messages, loading, sendMessage, highlightedContext, setHighlightedContext,
+    pendingTrade, clearPendingTrade,
+  } = useAIAdvisor();
 
   const [collapsed, setCollapsed]       = useState(false);
   const [input, setInput]               = useState('');
@@ -115,6 +120,21 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
           </div>
           
         </div>
+
+        {/* Live wallet balance — same number the AI reads before sizing
+            any trade. Shown here so what you see matches what it does.
+            (Inline margin here since ai-panel__wallet isn't defined in
+            AIAdvisorPanel.css — move this into that file if you'd rather
+            keep spacing out of the JSX.) */}
+        <div style={{ margin: '0 12px 10px' }}>
+          <WalletBalance variant="card" />
+        </div>
+
+        {/* Latest trade proposal + on-chain execution result. Persists
+            across messages until dismissed or replaced by the next
+            proposal — it's a "what just happened" summary, not a
+            per-message chat bubble. */}
+        <TradeResultCard trade={pendingTrade} onDismiss={clearPendingTrade} />
 
         {/* Chat window */}
         <div className="ai-panel__chat">

@@ -74,6 +74,78 @@ export function AIAdvisorProvider({ children }) {
     setHighlightedContext(null);
   }, []);
 
+  const clearPendingTrade = useCallback(() => {
+    setPendingTrade(null);
+  }, []);
+
+  // Called when the user clicks "Confirm" on a PENDING_CONFIRMATION trade
+  // (only reachable in "Suggest actions, I confirm each one" mode). Sends
+  // the exact selector from the /chat response — never a hand-edited copy
+  // — to /confirm-trade, which re-checks the live book itself before
+  // filling. Two outcomes come back:
+  //   - NEEDS_RECONFIRMATION: price/terms moved since the preview. We
+  //     merge the updated `current` details into pendingTrade so the card
+  //     can show what changed; call confirmTrade again with force=true to
+  //     proceed against the new terms.
+  //   - anything else: the fill attempt result (still dry-run while
+  //     FORCE_DRY_RUN is on server-side) replaces thetanuts_execution.
+  const confirmTrade = useCallback(async (force = false) => {
+    if (!pendingTrade?.confirm_selector) return;
+
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('Not signed in.');
+      const token = await user.getIdToken();
+
+      const response = await fetch('http://localhost:5000/api/aiagent/ai/confirm-trade', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          selector: pendingTrade.confirm_selector,
+          action: pendingTrade.action,
+          force,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Could not confirm trade.');
+      }
+
+      if (data.data.status === 'NEEDS_RECONFIRMATION') {
+        setPendingTrade(prev => prev && ({
+          ...prev,
+          thetanuts_execution: {
+            status: 'NEEDS_RECONFIRMATION',
+            reason: data.data.reason,
+            previous: data.data.previous || prev.confirm_selector,
+            current: data.data.current,
+          },
+          confirm_selector: {
+            ...prev.confirm_selector,
+            strike: data.data.current.strike,
+            expiry: data.data.current.expiry,
+            previewed_price: data.data.current.price,
+          },
+        }));
+      } else {
+        setPendingTrade(prev => prev && ({
+          ...prev,
+          thetanuts_execution: data.data.execution,
+        }));
+      }
+    } catch (error) {
+      console.error('Confirm Trade Error:', error);
+      setPendingTrade(prev => prev && ({
+        ...prev,
+        thetanuts_execution: { status: 'FAILED', error: error.message },
+      }));
+    }
+  }, [pendingTrade]);
+
   return (
     <AIAdvisorContext.Provider value={{ 
       messages, 
@@ -81,7 +153,10 @@ export function AIAdvisorProvider({ children }) {
       sendMessage, 
       clearMessages, 
       highlightedContext, 
-      setHighlightedContext 
+      setHighlightedContext,
+      pendingTrade,
+      clearPendingTrade,
+      confirmTrade
     }}>
       {children}
     </AIAdvisorContext.Provider>
@@ -89,7 +164,7 @@ export function AIAdvisorProvider({ children }) {
 }
 
 /** Internal helper — Server communication handler */
-async function _callBackend(conversationId, { text, fileData, fileName, highlightedText, chatHistory }, setMessages, setLoading) {
+async function _callBackend(conversationId, { text, fileData, fileName, highlightedText, chatHistory }, setMessages, setLoading, setPendingTrade) {
   setLoading(true);
   try {
     const user = auth.currentUser;

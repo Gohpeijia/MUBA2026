@@ -3,9 +3,13 @@ import '../shared.css';
 import './Advisor.css';
 import { FaPaperPlane, FaPaperclip, FaTimes, FaFileAlt, FaRobot } from 'react-icons/fa';
 import { useAIAdvisor } from './AIAdvisorContext';
+import TradeResultCard from './Traderesultcard';
 
 export default function Advisor() {
-  const { messages, loading, sendMessage, highlightedContext, setHighlightedContext } = useAIAdvisor();
+  const {
+    messages, loading, sendMessage, highlightedContext, setHighlightedContext,
+    pendingTrade, clearPendingTrade,
+  } = useAIAdvisor();
 
   const [input, setInput]               = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
@@ -86,6 +90,9 @@ export default function Advisor() {
           <p className="advisor-subtitle">Your personal AI trading agent</p>
         </div>
       </div>
+
+      {/* Latest trade proposal + on-chain execution result. */}
+      <TradeResultCard trade={pendingTrade} onDismiss={clearPendingTrade} />
 
       {/* Chat Window */}
       <div className="chat-window">

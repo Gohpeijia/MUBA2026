@@ -15,6 +15,7 @@ import { auth } from './firebase';
 import { AIAdvisorProvider, useAIAdvisor }  from './pages/AIAdvisorContext';
 import AIAdvisorPanel         from './pages/AIAdvisorPanel';
 import TextHighlightAsk       from './pages/TextHighlightAsk';
+import WalletBalance          from './pages/WalletBalance';
 
 /**
  * NavBar — collapses to icon-only when on /stocks,
@@ -96,6 +97,12 @@ function NavBar() {
         <FaRobot />
         {!isStocks && <span>AI Advisor</span>}
       </Link>
+
+      {/* Live, on-chain spendable capital — the exact number the AI
+          agent sizes trades against. Compact pill so it fits both the
+          full and icon-only nav states. */}
+      <WalletBalance variant="pill" />
+
       <a href="#" className="nav-logout" onClick={handleLogout} title="Log out">
         <FaSignOutAlt />
         {!isStocks && <span>Log Out</span>}

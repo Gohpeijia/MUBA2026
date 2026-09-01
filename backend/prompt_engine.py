@@ -10,13 +10,19 @@ class TradingAdvisorPromptManager:
     def __init__(self):
         pass
 
-    def get_system_prompt(self, preferences: dict = None, portfolio: dict = None) -> str:
+    def get_system_prompt(self, preferences: dict = None, portfolio: dict = None, wallet_balance: dict = None) -> str:
         """
         Generates the system prompt tailored to user survey responses, copilot configuration,
         auto-hedging settings, and portfolio metrics from the Investment Dashboard.
+
+        wallet_balance: the LIVE on-chain balance from ThetanutsTrader.get_wallet_balance(),
+        e.g. {"ok": True, "eth": 0.001, "usdc": 2.4, "tradable_usdc": 2.35}. This is the
+        real, spendable capital — separate from any Firestore `portfolio` bookkeeping — and
+        the model must never propose sizing a trade above tradable_usdc.
         """
         preferences = preferences or {}
         portfolio = portfolio or {}
+        wallet_balance = wallet_balance or {"ok": False, "eth": 0.0, "usdc": 0.0, "tradable_usdc": 0.0}
 
         # ── Survey Preferences from Preferences.jsx ──────────────────────────────
         employment_status = preferences.get("employmentStatus", "Not specified")
@@ -49,6 +55,15 @@ Your purpose is to assist the user with options position analysis, automated ris
 - Portfolio Market Value: ${portfolio_val:,.2f}
 - Realized P&L: ${realized_pnl:,.2f}
 - Unrealized P&L: ${unrealized_pnl:,.2f}
+
+=== LIVE WALLET BALANCE (Base Mainnet — real funds) ===
+- Wallet reachable: {"YES" if wallet_balance.get("ok") else "NO — treat as zero funds, do not recommend execution"}
+- ETH (gas): {wallet_balance.get("eth", 0.0):.6f}
+- USDC: {wallet_balance.get("usdc", 0.0):.4f}
+- Tradable USDC (after safety buffer): {wallet_balance.get("tradable_usdc", 0.0):.4f}
+- HARD RULE: never propose or size a trade above the Tradable USDC figure above. If Tradable USDC
+  is below 0.5, do not recommend execution regardless of swarm confidence — explain that the wallet
+  needs funding first instead.
 
 === PROTOCOL & ON-CHAIN EXECUTION RULES (THETANUTS V4) ===
 1. EXECUTION VENUE:

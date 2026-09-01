@@ -1,0 +1,163 @@
+/* WalletBalance — self-contained, prefixed classes so this can drop into
+   the existing app without colliding with shared.css / App.css. Colors
+   are set as local CSS variables at the root of the component so they're
+   easy to retune to match the rest of the app in one place. */
+
+.wallet-balance {
+  --wb-bg: #14161c;
+  --wb-border: #262a33;
+  --wb-text: #e8e9ec;
+  --wb-muted: #8a8f9c;
+  --wb-accent: #2fd88b;
+  --wb-warning: #e0a13c;
+  --wb-warning-bg: #2a2118;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--wb-bg);
+  border: 1px solid var(--wb-border);
+  border-radius: 10px;
+  color: var(--wb-text);
+  font-family: inherit;
+}
+
+.wallet-balance__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--wb-accent);
+  flex-shrink: 0;
+}
+
+.wallet-balance--warning .wallet-balance__icon {
+  color: var(--wb-warning);
+}
+
+.wallet-balance__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.wallet-balance__status {
+  font-size: 12px;
+  color: var(--wb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wallet-balance--warning .wallet-balance__status {
+  color: var(--wb-warning);
+}
+
+.wallet-balance__row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.wallet-balance__amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wallet-balance__unit {
+  font-weight: 400;
+  color: var(--wb-muted);
+  font-size: 0.85em;
+}
+
+.wallet-balance__label {
+  font-size: 11px;
+  color: var(--wb-muted);
+  text-transform: lowercase;
+}
+
+.wallet-balance__meta {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--wb-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wallet-balance__dot {
+  opacity: 0.6;
+}
+
+.wallet-balance__notice {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--wb-warning);
+  background: var(--wb-warning-bg);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.wallet-balance__refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--wb-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.wallet-balance__refresh:hover:not(:disabled) {
+  color: var(--wb-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wallet-balance__refresh:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.wallet-balance__refresh-icon--spinning {
+  animation: wallet-balance-spin 0.8s linear infinite;
+}
+
+@keyframes wallet-balance-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Pill variant — compact, for the NavBar ── */
+.wallet-balance--pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.wallet-balance--pill .wallet-balance__body {
+  flex-direction: row;
+  align-items: baseline;
+}
+
+.wallet-balance--pill .wallet-balance__amount {
+  font-size: 13px;
+}
+
+/* ── Card variant — fuller detail, for Dashboard / AI Advisor panel ── */
+.wallet-balance--card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  align-items: flex-start;
+}
+
+.wallet-balance--card .wallet-balance__amount {
+  font-size: 18px;
+}
+
+.wallet-balance--card .wallet-balance__icon {
+  margin-top: 2px;
+}

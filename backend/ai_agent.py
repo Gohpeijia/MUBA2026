@@ -11,6 +11,7 @@ import asyncio
 import time
 import requests
 import re
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from prompt_engine import ShariahAdvisorPromptManager, bina_dan_format_prompt
 from shariah_filter import shariahfilter
@@ -20,7 +21,49 @@ from news_fetcher import bina_data_kuantitatif, format_data_untuk_prompt
 from Risk_sizing import calculate_position_size
 from thetanuts_trader import ThetanutsTrader
 
+try:
+    from firebase_config import db
+except Exception:
+    db = None  # trade history logging becomes a no-op if Firestore isn't configured
+
 trader = ThetanutsTrader()
+
+# ── Global execution kill-switch ─────────────────────────────────────────
+# The wallet isn't funded yet. Until it is, every fill this backend ever
+# sends — regardless of riskCopilotMode, confidence, or which code path
+# triggers it (auto-execute here in ai_agent.py, or the confirm-trade
+# endpoint in ai_routes.py) — goes out with dry_run=True. This is checked
+# in addition to, not instead of, the riskCopilotMode gating below: it's a
+# blanket safety net, not a substitute for per-mode confirmation logic.
+# Flip to False once the wallet is funded and you're ready for live fills.
+FORCE_DRY_RUN = True
+
+
+def _log_thetanuts_trade(record: dict) -> None:
+    """
+    Appends one execution attempt (successful, failed, dry-run, or skipped)
+    to Firestore, grouped by calendar date so trade history reads back
+    naturally as "what happened on this day".
+
+    Path: thetanuts_trades / {YYYY-MM-DD} / entries / {auto-id}
+
+    Never raises — a logging failure should never take down a trade
+    response to the user, so this swallows and prints instead.
+    """
+    if db is None:
+        print("⚠️ [TradeHistory] Firestore not configured — trade not persisted.")
+        return
+    try:
+        now = datetime.now(timezone.utc)
+        date_key = now.strftime("%Y-%m-%d")
+        (
+            db.collection("thetanuts_trades")
+              .document(date_key)
+              .collection("entries")
+              .add({**record, "date": date_key, "logged_at": now.isoformat()})
+        )
+    except Exception as e:
+        print(f"⚠️ [TradeHistory] Failed to log trade: {e}")
 
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -107,27 +150,53 @@ class AIAgent:
         user_goal:          dict = None,
         portfolio:          dict = None,
     ):
-        # ── Auto-detect ticker ────────────────────────────────────────────────
+        # ── Auto-detect underlying (ETH/BTC) ─────────────────────────────────
+        # Thetanuts only trades options on ETH/BTC — this used to detect
+        # Bursa Malaysia stock tickers (the ".KL" suffix from the old
+        # Shariah-stocks app), which meant the swarm reasoned about a stock
+        # while execution filled whatever order happened to be first on a
+        # completely unrelated OptionBook. `ticker` below is now always
+        # "ETH", "BTC", or None — the one asset space the swarm, the
+        # Firestore consensus log, and the actual on-chain fill all share.
         if not ticker:
-            match = re.search(r'\b([A-Z0-9]+\.KL)\b', user_input.upper())
-            if not match:
-                match = re.search(r'\b([A-Z0-9]+\.KL)\b', page_context.upper())
-            if match:
-                ticker = match.group(1)
-                print(f"🔍 Ticker detected: {ticker}")
+            text = f"{user_input} {page_context}".upper()
+            if re.search(r'\bBTC\b|\bBITCOIN\b', text):
+                ticker = "BTC"
+            elif re.search(r'\bETH\b|\bETHEREUM\b|\bETHER\b', text):
+                ticker = "ETH"
+            if ticker:
+                print(f"🔍 Underlying detected: {ticker}")
 
         if previous_consensus is None and ticker:
             previous_consensus = self._consensus_history.get(ticker)
 
-        system_prompt = self.prompt_engine.get_system_prompt(preferences)
+        # ── Read the REAL on-chain wallet balance up front ─────────────────
+        # This is the actual spendable capital on Base mainnet — separate
+        # from any Firestore `portfolio` bookkeeping, which is legacy from
+        # the earlier stock-trading version and no longer represents real
+        # funds. The system prompt gets this so the AI never reasons about
+        # sizing without knowing what's actually available.
+        wallet_balance = trader.get_wallet_balance()
+        if not wallet_balance["ok"]:
+            print(f"⚠️ [Wallet] Could not read live balance: {wallet_balance['error']}")
+
+        system_prompt = self.prompt_engine.get_system_prompt(preferences, wallet_balance=wallet_balance)
 
         # ── Semakan Syariah ───────────────────────────────────────────────────
+        # check_compliance() reads equity debt/cash-ratio filings — meaningless
+        # for ETH/BTC, so it's skipped for the crypto underlyings this agent
+        # now trades. If Shariah screening of the crypto asset itself matters
+        # for your pitch, that needs separate logic — this just avoids running
+        # a stock-specific check against a ticker it was never built for.
         is_compliant = False
         reason       = "No specific stock analyzed."
         cash_ratio   = 15.0
         debt_ratio   = 20.0
 
-        if ticker:
+        if ticker in ("ETH", "BTC"):
+            is_compliant = True
+            reason       = "Crypto underlying — equity Shariah debt/cash-ratio check not applicable."
+        elif ticker:
             compliance_data = self.shariah.check_compliance(ticker)
             is_compliant    = compliance_data.get("isHalal", False)
             reason          = compliance_data.get("reason", "Unknown")
@@ -154,11 +223,19 @@ class AIAgent:
             # LANGKAH 1: Ambil data harga + asas + sentimen sebelum swarm berjalan
             # (ini menyelesaikan masalah "data unavailable" dalam agen)
             try:
+                # yfinance/Finnhub want "ETH-USD"/"BTC-USD", not the bare
+                # "ETH"/"BTC" the Thetanuts CLI takes — `ticker` stays bare
+                # everywhere else (Thetanuts calls, Firestore logs, swarm
+                # labeling); this is purely the symbol used for the market
+                # data lookup. UNVERIFIED: confirm bina_data_kuantitatif()
+                # (in news_fetcher.py, not reviewed here) actually resolves
+                # this format the same way it resolves stock tickers.
+                market_symbol = f"{ticker}-USD" if ticker in ("ETH", "BTC") else ticker
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     kuantitatif = loop.run_until_complete(
-                        bina_data_kuantitatif(ticker, is_compliant, reason)
+                        bina_data_kuantitatif(market_symbol, is_compliant, reason)
                     )
                 finally:
                     loop.close()
@@ -226,63 +303,206 @@ class AIAgent:
                 )
                 self._consensus_history[ticker] = structured_consensus
 
-                # ── START: RISK SIZING & THETANUTS ON-CHAIN TRADING ────────────────
+                # ── START: WALLET-AWARE SIZING & THETANUTS ON-CHAIN EXECUTION ──────
                 consensus_action = structured_consensus.get("consensus", "").upper()
                 confidence = structured_consensus.get("confidence", 0)
+                prefs = preferences or {}
+                risk_tolerance = prefs.get("riskTolerance", "Moderate")
 
-                # 1. Calculate Risk / Position Size if portfolio provided
-                if portfolio and consensus_action in ["BUY", "SELL"]:
-                    prefs = preferences or {}
-                    entry_price = kuantitatif.get("harga_semasa", 0.0)
-                    if entry_price > 0:
-                        trade_proposal = calculate_position_size(
-                            portfolio_value = portfolio.get("total_value", 0.0),
-                            entry_price = entry_price,
-                            risk_tolerance = prefs.get("riskTolerance", "Moderate"),
-                            stop_loss_price = None,
-                            existing_exposure_value = portfolio.get("positions", {}).get(ticker, {}).get("market_value", 0.0),
-                            open_ai_risk_value = portfolio.get("open_ai_risk_value", 0.0),
-                            direction = consensus_action
-                        )
-                        print(f"📐 Suggested Size: {trade_proposal.get('recommended_shares', 0)} shares")
+                # Premium budget as a % of TRADABLE (real, live) USDC — tiered by
+                # risk tolerance. This replaces the old share-based sizing, which
+                # assumed a stock portfolio value that no longer exists; on
+                # Thetanuts, max loss is capped at the premium paid, so sizing is
+                # simply "how much of the wallet's live USDC to put on this trade".
+                RISK_PCT_BY_TOLERANCE = {"Low (Conservative)": 0.10, "Moderate": 0.20, "High (Aggressive)": 0.35}
+                risk_pct = RISK_PCT_BY_TOLERANCE.get(risk_tolerance, 0.20)
 
-                # 2. Trigger Real On-Chain Options Trade if High Confidence BUY/SELL
+                tradable_usdc = wallet_balance.get("tradable_usdc", 0.0)
+                proposed_amount = round(tradable_usdc * risk_pct, 4)
+
+                # riskCopilotMode governs whether ANY on-chain action is
+                # taken here without a separate, explicit user confirmation.
+                # Only "Fully automated recommendations" is allowed to reach
+                # execute_fill(dry_run=False) from this code path — every
+                # other mode either stays purely informational or stops at
+                # a preview that /confirm-trade must be called to complete.
+                copilot_mode = prefs.get("riskCopilotMode", "Suggest actions, I confirm each one")
+
+                trade_proposal = {
+                    "action": consensus_action,
+                    "ticker": ticker,
+                    "confidence": confidence,
+                    "risk_tolerance": risk_tolerance,
+                    "risk_copilot_mode": copilot_mode,
+                    "wallet_tradable_usdc": tradable_usdc,
+                    "proposed_amount_usdc": proposed_amount,
+                }
+
+                execution_record = None
+
                 if consensus_action in ["BUY", "SELL"] and confidence >= 50:
-                    print(f"🚀 [Thetanuts] Executing {consensus_action} order on Base Mainnet...")
-                    
-                    # Fetch live orders from OptionBook
-                    orders = trader.get_live_orders()
-                    
-                    if isinstance(orders, list) and len(orders) > 0:
-                        target_order = orders[0]  # Select top matching order
-                        order_id = target_order.get("id", target_order.get("orderHash"))
-                        
-                        # Execute fill (1 USDC fill)
-                        # Set dry_run=True during testing, dry_run=False for live hackathon trade
-                        execution_result = trader.execute_fill(
-                            order_id=order_id,
-                            amount=1.0, 
-                            dry_run=False
-                        )
-                        
-                        # Store result into trade_proposal to pass back to UI
-                        if not trade_proposal:
-                            trade_proposal = {}
+
+                    # ── Mode 1: Alert me only, I act manually ───────────────
+                    # No CLI call at all — not even a dry-run preview. The
+                    # user asked to be told, not shown a simulated fill.
+                    if copilot_mode == "Alert me only, I act manually":
+                        print(f"🔔 [Thetanuts] Alert-only mode — surfacing {consensus_action} {ticker} without previewing or filling.")
                         trade_proposal["thetanuts_execution"] = {
-                            "status": "SUCCESS",
-                            "order_id": order_id,
-                            "raw_response": execution_result
+                            "status": "ALERT_ONLY",
+                            "reason": "Risk Copilot is set to alert-only — no order was previewed or sent. Trade manually on Thetanuts if you agree with this signal.",
                         }
-                        print(f"✅ [Thetanuts] Trade executed: {execution_result}")
+                        execution_record = {
+                            "ticker": ticker, "action": consensus_action, "confidence": confidence,
+                            "status": "ALERT_ONLY", "amount_usdc": 0,
+                            "order_index": None, "tx_hash": None,
+                            "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
+                        }
+
+                    elif not wallet_balance.get("ok") or tradable_usdc < 0.5:
+                        # No point calling the CLI at all — we already know it'll fail.
+                        print(f"⏭️ [Thetanuts] Skipping execution — wallet balance unavailable or below 0.5 USDC (have {tradable_usdc}).")
+                        trade_proposal["thetanuts_execution"] = {
+                            "status": "SKIPPED_INSUFFICIENT_FUNDS",
+                            "tradable_usdc": tradable_usdc,
+                        }
+                        execution_record = {
+                            "ticker": ticker, "action": consensus_action, "confidence": confidence,
+                            "status": "SKIPPED_INSUFFICIENT_FUNDS", "amount_usdc": 0,
+                            "order_index": None, "tx_hash": None,
+                            "wallet_tradable_usdc": tradable_usdc, "dry_run": False,
+                        }
+
                     else:
-                        print("⚠️ [Thetanuts] No active orders available on OptionBook to fill.")
-                        if not trade_proposal:
-                            trade_proposal = {}
-                        trade_proposal["thetanuts_execution"] = {
-                            "status": "FAILED",
-                            "reason": "No active orders on OptionBook"
-                        }
-                # ── END: RISK SIZING LOGIC ───────────────────────────────
+                        print(f"🚀 [Thetanuts] {copilot_mode} — resolving book for {consensus_action} {ticker} at {proposed_amount} USDC...")
+                        # Filtered to `ticker` — previously this fetched the
+                        # WHOLE book and took index [0] regardless of asset,
+                        # so a BUY/SELL decided about one underlying could
+                        # fill a completely unrelated order. Only ETH/BTC
+                        # orders for the asset the swarm just analyzed come
+                        # back here.
+                        orders = trader.get_live_orders(underlying=ticker)
+
+                        if orders.get("ok") and isinstance(orders.get("data"), list) and len(orders["data"]) > 0:
+                            target_order = orders["data"][0]
+
+                            # Prefer the explicit selector (pins the exact
+                            # contract) over --order-index (position-based,
+                            # only correct if it resolves against the same
+                            # filtered list — unverified against a live
+                            # response). Field names below are a best guess
+                            # from the CLI's own flag names — confirm with
+                            # one real `book orders --underlying ETH -o json`
+                            # dry run and adjust if they don't match.
+                            order_type   = target_order.get("type") or target_order.get("optionType")
+                            order_strike = target_order.get("strike")
+                            order_expiry = target_order.get("expiry") or target_order.get("expiryTimestamp")
+                            order_price  = target_order.get("price") or target_order.get("premium")
+                            has_schema   = order_type and order_strike is not None and order_expiry
+
+                            # ── Mode 2: Suggest actions, I confirm each one ──
+                            # Preview only (always dry_run=True — this mode
+                            # must NEVER fill on its own). Hand back the exact
+                            # selector so the frontend can send it to
+                            # /confirm-trade, which re-checks the book fresh
+                            # at confirmation time before ever filling for
+                            # real.
+                            if copilot_mode == "Suggest actions, I confirm each one":
+                                if has_schema:
+                                    preview_result = trader.execute_fill(
+                                        collateral_usdc=proposed_amount,
+                                        underlying=ticker,
+                                        option_type=order_type,
+                                        strike=order_strike,
+                                        expiry=order_expiry,
+                                        dry_run=True,
+                                    )
+                                else:
+                                    print("⚠️ [Thetanuts] Order fields didn't match expected schema — previewing with --order-index 0 (unverified).")
+                                    preview_result = trader.execute_fill(
+                                        collateral_usdc=proposed_amount,
+                                        order_index=0,
+                                        dry_run=True,
+                                    )
+
+                                trade_proposal["thetanuts_execution"] = {
+                                    "status": "PENDING_CONFIRMATION",
+                                    "preview": preview_result,
+                                }
+                                # Everything /confirm-trade needs to re-fetch
+                                # the book and refill this exact contract —
+                                # never the stale preview_result itself.
+                                trade_proposal["confirm_selector"] = {
+                                    "underlying": ticker,
+                                    "option_type": order_type,
+                                    "strike": order_strike,
+                                    "expiry": order_expiry,
+                                    "collateral_usdc": proposed_amount,
+                                    "previewed_price": order_price,
+                                }
+                                execution_record = {
+                                    "ticker": ticker, "action": consensus_action, "confidence": confidence,
+                                    "status": "PENDING_CONFIRMATION", "amount_usdc": proposed_amount,
+                                    "order_index": None, "tx_hash": None,
+                                    "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
+                                }
+                                print(f"⏸️ [Thetanuts] Preview only — waiting on user confirmation via /confirm-trade.")
+
+                            # ── Mode 3: Fully automated recommendations ──────
+                            # The only mode allowed to reach a real fill from
+                            # this code path. Still forced through dry_run
+                            # while FORCE_DRY_RUN is True (wallet unfunded).
+                            else:
+                                effective_dry_run = FORCE_DRY_RUN
+                                if effective_dry_run:
+                                    print("🧪 [Thetanuts] FORCE_DRY_RUN is on — running as a dry-run even in fully-automated mode.")
+
+                                if has_schema:
+                                    execution_result = trader.execute_fill(
+                                        collateral_usdc=proposed_amount,
+                                        underlying=ticker,
+                                        option_type=order_type,
+                                        strike=order_strike,
+                                        expiry=order_expiry,
+                                        dry_run=effective_dry_run,
+                                    )
+                                else:
+                                    print("⚠️ [Thetanuts] Order fields didn't match expected schema — falling back to --order-index 0 (unverified).")
+                                    execution_result = trader.execute_fill(
+                                        collateral_usdc=proposed_amount,
+                                        order_index=0,
+                                        dry_run=effective_dry_run,
+                                    )
+
+                                trade_proposal["thetanuts_execution"] = execution_result
+                                execution_record = {
+                                    "ticker": ticker, "action": consensus_action, "confidence": confidence,
+                                    "status": execution_result["status"], "amount_usdc": proposed_amount,
+                                    "order_index": execution_result.get("order_index"), "tx_hash": execution_result["tx_hash"],
+                                    "wallet_tradable_usdc": tradable_usdc, "dry_run": effective_dry_run,
+                                    "error": execution_result["error"],
+                                }
+                                if execution_result["ok"]:
+                                    print(f"✅ [Thetanuts] {'Dry-run' if effective_dry_run else 'Live'} trade result: {execution_result}")
+                                else:
+                                    print(f"❌ [Thetanuts] Trade failed: {execution_result['error']}")
+                        else:
+                            print("⚠️ [Thetanuts] No active orders available on OptionBook to fill.")
+                            trade_proposal["thetanuts_execution"] = {
+                                "status": "FAILED",
+                                "reason": orders.get("error") or "No active orders on OptionBook",
+                            }
+                            execution_record = {
+                                "ticker": ticker, "action": consensus_action, "confidence": confidence,
+                                "status": "FAILED", "amount_usdc": 0, "order_index": None, "tx_hash": None,
+                                "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
+                                "error": orders.get("error") or "No active orders on OptionBook",
+                            }
+
+                # Every attempt gets logged — success, failure, or skip — so the
+                # history is a complete record, not just a highlight reel.
+                if execution_record is not None:
+                    _log_thetanuts_trade(execution_record)
+                # ── END: WALLET-AWARE SIZING & EXECUTION ────────────────────────
 
             except Exception as e:
                 print(f"⚠️ AI Swarm failed: {e}")
