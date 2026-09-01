@@ -12,7 +12,7 @@ from portfolio_routes import portfolio_bp
 from market_routes import market_bp
 from zakat_endpoints import zakat_bp
 from ai_routes import ai_bp
-
+from wallet_routes import wallet_bp
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +38,7 @@ app.register_blueprint(portfolio_bp, url_prefix='/api/stocks/portfolio')
 app.register_blueprint(market_bp, url_prefix='/api/stocks/market')
 app.register_blueprint(zakat_bp, url_prefix='/api/zakat')
 app.register_blueprint(ai_bp, url_prefix='/api/aiagent/ai')
+app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
 
 @app.route('/', methods=['GET'])
 def home():

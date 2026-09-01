@@ -49,9 +49,18 @@ export default function WalletBalance({ variant = 'pill' }) {
   useEffect(() => {
     fetchBalance();
     const interval = setInterval(fetchBalance, REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [fetchBalance]);
+    
+    // Listen for global sync events from other components
+    const handleGlobalRefresh = () => {
+      fetchBalance();
+    };
+    window.addEventListener('wallet:refresh', handleGlobalRefresh);
 
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('wallet:refresh', handleGlobalRefresh);
+    };
+  }, [fetchBalance]);
   // Two different kinds of "not good": the request itself failed
   // (network/auth), or it succeeded but the wallet reports ok=false
   // (no key configured, RPC unreachable, etc). Both render as a
@@ -129,7 +138,10 @@ export default function WalletBalance({ variant = 'pill' }) {
       <button
         type="button"
         className="wallet-balance__refresh"
-        onClick={fetchBalance}
+       onClick={() => {
+          fetchBalance(); // Refresh this instance
+          window.dispatchEvent(new CustomEvent('wallet:refresh')); // Tell the other instance to refresh too
+        }}
         disabled={loading}
         aria-label="Refresh wallet balance"
         title="Refresh"
