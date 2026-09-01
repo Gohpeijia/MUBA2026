@@ -52,6 +52,9 @@ PETA_TICKER_FINNHUB = {
 # BAHAGIAN 1 — Ambil harga & asas kewangan (yfinance)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _adalah_simbol_lengkap(ticker: str) -> bool:
+    return "-" in ticker.upper()
+
 def ambil_data_harga_dan_asas(ticker: str) -> dict:
     """
     Ambil data harga semasa dan asas kewangan dari Yahoo Finance.
@@ -64,7 +67,10 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
     - Purata bergerak 50 hari & 200 hari
     """
     ticker_bersih = ticker.upper().replace(".KL", "")
-    simbol_yahoo = PETA_TICKER_BURSA.get(ticker_bersih, f"{ticker_bersih}.KL")
+    if _adalah_simbol_lengkap(ticker):
+        simbol_yahoo = ticker.upper()
+    else:
+        simbol_yahoo = PETA_TICKER_BURSA.get(ticker_bersih, f"{ticker_bersih}.KL")
 
     try:
         saham = yf.Ticker(simbol_yahoo)
@@ -164,6 +170,16 @@ def _data_kosong(ticker: str, sebab: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def ambil_sentimen_berita(ticker: str) -> dict:
+    
+    if _adalah_simbol_lengkap(ticker):
+        return {
+        "berjaya": False,
+        "sebab":   "Sentimen berita syarikat tidak berkenaan untuk crypto.",
+        "skor":    0.5,
+        "label":   "Neutral ⏸️",
+        "isyarat": "HOLD",
+        }
+    
     """
     Ambil skor sentimen berita dari Finnhub.
     Mengembalikan skor 0.0–1.0 dan label Melayu.
