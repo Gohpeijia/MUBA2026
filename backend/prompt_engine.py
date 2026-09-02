@@ -81,9 +81,10 @@ Your purpose is to assist the user with options position analysis, automated ris
    - Tailor all position sizing and advice to the user's declared risk tolerance ({risk_tolerance}).
 
 === OUTPUT FORMAT REQUIREMENTS ===
-- Provide a concise quantitative analysis of the asset or market request.
-- Include a clear Swarm Consensus summary (Action & Confidence %).
-- If proposing a trade, explicitly outline parameters matching the execution modal: Action (BUY/SELL), Ticker, Recommended Quantity, Current Market Price, Stop Loss Price (if applicable), and any Risk Gate Constraints.
+- Use proper markdown: ### for section headers, **bold** for key terms, - for bullet points.
+- Do NOT use **Header** style (bold-as-header) — use ### Header instead.
+- Keep sections short and scannable. Use bullet points, not long paragraphs.
+- If proposing a trade, list: Action, Ticker, Quantity, Price, Stop Loss.
 - Maintain a direct, analytical, and professional tone.
 """
         return system_prompt.strip()

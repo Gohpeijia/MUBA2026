@@ -48,6 +48,7 @@ nav a{
 nav.nav-icon-only {
     width: 60px;
     padding: 20px 5px;
+    overflow: hidden;
 }
 
 nav.nav-icon-only a {
@@ -55,11 +56,27 @@ nav.nav-icon-only a {
     padding: 10px 0;
 }
 
+/* Hide the wallet pill's text and refresh button in icon-only nav */
+nav.nav-icon-only .wallet-balance--pill {
+    justify-content: center;
+    padding: 8px 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    width: 100%;
+}
+
+nav.nav-icon-only .wallet-balance--pill .wallet-balance__body,
+nav.nav-icon-only .wallet-balance--pill .wallet-balance__refresh {
+    display: none;
+}
+
 /* Responsive: collapse to icon-only on small screens */
 @media (max-width: 768px) {
     nav {
         width: 60px;
         padding: 20px 5px;
+        overflow: hidden;
     }
 
     nav a {
@@ -73,6 +90,21 @@ nav.nav-icon-only a {
 
     nav a svg {
         font-size: 1.2rem;
+    }
+
+    /* Hide wallet pill text on small screens too */
+    nav .wallet-balance--pill {
+        justify-content: center;
+        padding: 8px 0;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        width: 100%;
+    }
+
+    nav .wallet-balance--pill .wallet-balance__body,
+    nav .wallet-balance--pill .wallet-balance__refresh {
+        display: none;
     }
 }
 

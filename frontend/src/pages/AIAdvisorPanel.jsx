@@ -3,6 +3,8 @@ import { FaRobot, FaPaperPlane, FaPaperclip, FaTimes, FaFileAlt, FaChevronLeft, 
 import { useAIAdvisor } from './AIAdvisorContext';
 import WalletBalance from './WalletBalance';
 import TradeResultCard from './Traderesultcard';
+import ReactMarkdown from 'react-markdown';
+import InvestmentIntelligenceCard from './components/InvestmentIntelligenceCard';
 import './AIAdvisorPanel.css';
 
 export default function AIAdvisorPanel({ pendingText, onClearPending }) {
@@ -154,14 +156,43 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
                     Context: "{msg.highlightedText}"
                   </div>
                 )}
-                
+
                 {msg.fileName && (
                   <div className="ai-panel__file-tag">
                     <FaFileAlt size={10} />
                     <span>{msg.fileName}</span>
                   </div>
                 )}
-                <span className="ai-panel__bubble-text">{msg.content}</span>
+
+                {msg.role === 'assistant' ? (
+                  <div className="ai-panel__bubble-text ai-panel__bubble-markdown">
+                    <ReactMarkdown
+                      components={{
+                        strong: ({ children }) => <strong className="md-bold">{children}</strong>,
+                        em: ({ children }) => <em className="md-italic">{children}</em>,
+                        h1: ({ children }) => <div className="md-h1">{children}</div>,
+                        h2: ({ children }) => <div className="md-h2">{children}</div>,
+                        h3: ({ children }) => <div className="md-h3">{children}</div>,
+                        ul: ({ children }) => <ul className="md-ul">{children}</ul>,
+                        ol: ({ children }) => <ol className="md-ol">{children}</ol>,
+                        li: ({ children }) => <li className="md-li">{children}</li>,
+                        p: ({ children }) => <p className="md-p">{children}</p>,
+                        hr: () => <hr className="md-hr" />,
+                        code: ({ children }) => <code className="md-code">{children}</code>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+
+                    {msg.investmentAnalysis && (
+                      <div style={{ marginTop: '0.65rem' }}>
+                        <InvestmentIntelligenceCard data={msg.investmentAnalysis} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span className="ai-panel__bubble-text">{msg.content}</span>
+                )}
               </div>
             </div>
           ))}

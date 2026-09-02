@@ -4,6 +4,8 @@ import './Advisor.css';
 import { FaPaperPlane, FaPaperclip, FaTimes, FaFileAlt, FaRobot } from 'react-icons/fa';
 import { useAIAdvisor } from './AIAdvisorContext';
 import TradeResultCard from './Traderesultcard';
+import ReactMarkdown from 'react-markdown';
+import InvestmentIntelligenceCard from './components/InvestmentIntelligenceCard';
 
 export default function Advisor() {
   const {
@@ -121,7 +123,33 @@ export default function Advisor() {
                   <span>{msg.fileName}</span>
                 </div>
               )}
-              <span className="bubble-text">{msg.content}</span>
+
+              {msg.role === 'assistant' ? (
+                <div className="bubble-text bubble-markdown">
+                  <ReactMarkdown
+                    components={{
+                      strong: ({ children }) => <strong style={{ color: 'var(--teal)', fontWeight: 700 }}>{children}</strong>,
+                      h1: ({ children }) => <div style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0.6rem 0 0.3rem', color: 'var(--teal)' }}>{children}</div>,
+                      h2: ({ children }) => <div style={{ fontSize: '0.98rem', fontWeight: 700, margin: '0.5rem 0 0.25rem', color: 'var(--teal)' }}>{children}</div>,
+                      h3: ({ children }) => <div style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0.4rem 0 0.2rem', color: 'var(--teal)' }}>{children}</div>,
+                      ul: ({ children }) => <ul style={{ margin: '0.25rem 0 0.4rem 1.2rem', padding: 0 }}>{children}</ul>,
+                      ol: ({ children }) => <ol style={{ margin: '0.25rem 0 0.4rem 1.2rem', padding: 0 }}>{children}</ol>,
+                      li: ({ children }) => <li style={{ marginBottom: '0.25rem', lineHeight: 1.55 }}>{children}</li>,
+                      p: ({ children }) => <p style={{ margin: '0 0 0.5rem 0', lineHeight: 1.6 }}>{children}</p>,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+
+                  {msg.investmentAnalysis && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <InvestmentIntelligenceCard data={msg.investmentAnalysis} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span className="bubble-text">{msg.content}</span>
+              )}
             </div>
           </div>
         ))}

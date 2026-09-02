@@ -222,6 +222,91 @@
   word-break: break-word;
 }
 
+/* ── Markdown rendered content (assistant bubbles only) ── */
+.ai-panel__bubble-markdown {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Paragraphs — small gap between them */
+.ai-panel__bubble-markdown .md-p {
+  margin: 0 0 0.45rem 0;
+  line-height: 1.6;
+}
+.ai-panel__bubble-markdown .md-p:last-child {
+  margin-bottom: 0;
+}
+
+/* Bold */
+.ai-panel__bubble-markdown .md-bold {
+  font-weight: 700;
+  color: var(--teal);
+}
+
+/* Italic */
+.ai-panel__bubble-markdown .md-italic {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+/* Section headers */
+.ai-panel__bubble-markdown .md-h1,
+.ai-panel__bubble-markdown .md-h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  color: var(--teal);
+  font-size: 0.95rem;
+  margin: 0.7rem 0 0.3rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1.5px solid var(--border);
+}
+
+.ai-panel__bubble-markdown .md-h3 {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  margin: 0.55rem 0 0.2rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Bullet lists */
+.ai-panel__bubble-markdown .md-ul {
+  margin: 0.25rem 0 0.4rem 1.1rem;
+  padding: 0;
+  list-style: disc;
+}
+
+/* Numbered lists */
+.ai-panel__bubble-markdown .md-ol {
+  margin: 0.25rem 0 0.4rem 1.1rem;
+  padding: 0;
+  list-style: decimal;
+}
+
+.ai-panel__bubble-markdown .md-li {
+  margin-bottom: 0.2rem;
+  line-height: 1.55;
+}
+
+/* Divider */
+.ai-panel__bubble-markdown .md-hr {
+  border: none;
+  border-top: 1.5px solid var(--border);
+  margin: 0.6rem 0;
+}
+
+/* Inline code */
+.ai-panel__bubble-markdown .md-code {
+  background: rgba(26, 107, 107, 0.08);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.82rem;
+  color: var(--teal);
+}
+
 /* ── File tag inside bubble ── */
 .ai-panel__file-tag {
   display: inline-flex;

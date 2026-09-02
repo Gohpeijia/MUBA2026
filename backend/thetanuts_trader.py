@@ -74,16 +74,25 @@ class ThetanutsTrader:
 
         if not self.private_key:
             self._init_error = "WALLET_PRIVATE_KEY not set in environment — wallet features disabled."
-            print(f"🚨 [ThetanutsTrader] {self._init_error}")
+            try:
+                print(f"[ThetanutsTrader] {self._init_error}")
+            except Exception:
+                pass
             return
 
         try:
             self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 10}))
             self.account = Account.from_key(self.private_key)
-            print(f"🔑 [ThetanutsTrader] Wallet loaded: {self.account.address} (RPC: {self.rpc_url})")
+            try:
+                print(f"[ThetanutsTrader] Wallet loaded: {self.account.address} (RPC: {self.rpc_url})")
+            except Exception:
+                pass
         except Exception as e:
             self._init_error = f"Failed to initialize wallet/web3: {e}"
-            print(f"🚨 [ThetanutsTrader] {self._init_error}")
+            try:
+                print(f"[ThetanutsTrader] {self._init_error}")
+            except Exception:
+                pass
 
     # ──────────────────────────────────────────────────────────────────
     #  WALLET BALANCE

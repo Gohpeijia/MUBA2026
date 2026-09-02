@@ -13,45 +13,21 @@ import requests
 import re
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from prompt_engine import ShariahAdvisorPromptManager, bina_dan_format_prompt
-from shariah_filter import shariahfilter
-from mirofish_loop import SwarmSimulationEngine
-from consensus_engine import calculate_swarm_consensus
-from news_fetcher import bina_data_kuantitatif, format_data_untuk_prompt
-from Risk_sizing import calculate_position_size
+from prompt_engine import ShariahAdvisorPromptManager
+from agents.orchestrator import SwarmOrchestrator as SwarmSimulationEngine
+from services.asset_resolver import resolve_asset_from_query
 from thetanuts_trader import ThetanutsTrader
 
 try:
     from firebase_config import db
 except Exception:
-    db = None  # trade history logging becomes a no-op if Firestore isn't configured
+    db = None
 
 trader = ThetanutsTrader()
-
-# ── Global execution kill-switch ─────────────────────────────────────────
-# The wallet isn't funded yet. Until it is, every fill this backend ever
-# sends — regardless of riskCopilotMode, confidence, or which code path
-# triggers it (auto-execute here in ai_agent.py, or the confirm-trade
-# endpoint in ai_routes.py) — goes out with dry_run=True. This is checked
-# in addition to, not instead of, the riskCopilotMode gating below: it's a
-# blanket safety net, not a substitute for per-mode confirmation logic.
-# Flip to False once the wallet is funded and you're ready for live fills.
 FORCE_DRY_RUN = True
 
-
 def _log_thetanuts_trade(record: dict) -> None:
-    """
-    Appends one execution attempt (successful, failed, dry-run, or skipped)
-    to Firestore, grouped by calendar date so trade history reads back
-    naturally as "what happened on this day".
-
-    Path: thetanuts_trades / {YYYY-MM-DD} / entries / {auto-id}
-
-    Never raises — a logging failure should never take down a trade
-    response to the user, so this swallows and prints instead.
-    """
     if db is None:
-        print("⚠️ [TradeHistory] Firestore not configured — trade not persisted.")
         return
     try:
         now = datetime.now(timezone.utc)
@@ -99,6 +75,10 @@ def get_sentiment_data(ticker: str) -> dict:
         return None
 
 
+from services.asset_resolver import resolve_asset_from_query
+
+# (continued imports above)
+
 class AIAgent:
     def __init__(self):
         groq_key       = os.getenv("GROQ_API_KEY")
@@ -112,15 +92,15 @@ class AIAgent:
                 "name":    "Groq",
                 "url":     "https://api.groq.com/openai/v1/chat/completions",
                 "headers": {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                "model":   "llama-3.3-70b-versatile",
+                "model":   "qwen/qwen3.6-27b",
             })
 
         if openrouter_key:
             self.providers.append({
-                "name":    "Qwen (OpenRouter)",
+                "name":    "OpenRouter (Llama 3.1)",
                 "url":     "https://openrouter.ai/api/v1/chat/completions",
                 "headers": {"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
-                "model":   "qwen/qwen-2.5-72b-instruct:free",
+                "model":   "meta-llama/llama-3.1-8b-instruct",
             })
 
         if gemini_key:
@@ -136,7 +116,6 @@ class AIAgent:
 
         self._consensus_history: dict = {}
         self.prompt_engine  = ShariahAdvisorPromptManager()
-        self.shariah        = shariahfilter()
         self.swarm_engine   = SwarmSimulationEngine()
 
     def process(
@@ -150,386 +129,67 @@ class AIAgent:
         user_goal:          dict = None,
         portfolio:          dict = None,
     ):
-        # ── Auto-detect underlying (ETH/BTC) ─────────────────────────────────
-        # Thetanuts only trades options on ETH/BTC — this used to detect
-        # Bursa Malaysia stock tickers (the ".KL" suffix from the old
-        # Shariah-stocks app), which meant the swarm reasoned about a stock
-        # while execution filled whatever order happened to be first on a
-        # completely unrelated OptionBook. `ticker` below is now always
-        # "ETH", "BTC", or None — the one asset space the swarm, the
-        # Firestore consensus log, and the actual on-chain fill all share.
-        if not ticker:
-            text = f"{user_input} {page_context}".upper()
-            if re.search(r'\bBTC\b|\bBITCOIN\b', text):
-                ticker = "BTC"
-            elif re.search(r'\bETH\b|\bETHEREUM\b|\bETHER\b', text):
-                ticker = "ETH"
-            if ticker:
-                print(f"🔍 Underlying detected: {ticker}")
+        # ── 1. INTELLIGENT ASSET RESOLUTION ──────────────────────────────────
+        # Resolves queries with typos (e.g. "NASDAS 100"), aliases ("NDX", "US100", "Gold"),
+        # Bursa codes ("1155.KL"), or US tickers ("AAPL") into canonical asset info.
+        resolved_asset = resolve_asset_from_query(user_input, page_context)
+        if not resolved_asset and ticker:
+            resolved_asset = resolve_asset_from_query(ticker, page_context)
 
-        if previous_consensus is None and ticker:
-            previous_consensus = self._consensus_history.get(ticker)
+        # ── 2. IF ASSET RESOLVED -> TRIGGER MULTI-AGENT INVESTMENT INTELLIGENCE ──
+        if resolved_asset:
+            sym = resolved_asset["symbol"]
+            canonical_name = resolved_asset["canonical_name"]
+            print(f"🎯 [AIAgent] Asset resolved: '{user_input}' -> {canonical_name} ({sym}). Triggering 5-Agent Intelligence...")
 
-        # ── Read the REAL on-chain wallet balance up front ─────────────────
-        # This is the actual spendable capital on Base mainnet — separate
-        # from any Firestore `portfolio` bookkeeping, which is legacy from
-        # the earlier stock-trading version and no longer represents real
-        # funds. The system prompt gets this so the AI never reasons about
-        # sizing without knowing what's actually available.
-        wallet_balance = trader.get_wallet_balance()
-        if not wallet_balance["ok"]:
-            print(f"⚠️ [Wallet] Could not read live balance: {wallet_balance['error']}")
-
-        system_prompt = self.prompt_engine.get_system_prompt(preferences, wallet_balance=wallet_balance)
-
-        # ── Semakan Syariah ───────────────────────────────────────────────────
-        # check_compliance() reads equity debt/cash-ratio filings — meaningless
-        # for ETH/BTC, so it's skipped for the crypto underlyings this agent
-        # now trades. If Shariah screening of the crypto asset itself matters
-        # for your pitch, that needs separate logic — this just avoids running
-        # a stock-specific check against a ticker it was never built for.
-        is_compliant = False
-        reason       = "No specific stock analyzed."
-        cash_ratio   = 15.0
-        debt_ratio   = 20.0
-
-        if ticker in ("ETH", "BTC"):
-            is_compliant = True
-            reason       = "Crypto underlying — equity Shariah debt/cash-ratio check not applicable."
-        elif ticker:
-            compliance_data = self.shariah.check_compliance(ticker)
-            is_compliant    = compliance_data.get("isHalal", False)
-            reason          = compliance_data.get("reason", "Unknown")
-            cash_ratio      = compliance_data.get("cash_ratio", 15.0)
-            debt_ratio      = compliance_data.get("debt_ratio", 20.0)
-
-        # ── FIX BUG 1 & 2: Swarm hanya dijalankan jika ada ticker ────────────
-        # Sebelum fix: swarm dijalankan dengan "MARKET" + data kosong walaupun
-        #              tiada ticker → agen sentiasa kata "data unavailable"
-        # Selepas fix: jika tiada ticker, skip swarm terus → jimat masa & token
-        #              jika ada ticker, ambil data kuantitatif DULU, baru swarm
-
-        structured_consensus = None  # ← nilai lalai untuk soalan am
-        trade_proposal       = None
-        kuantitatif          = {
-            "is_compliant": is_compliant,
-            "reason":       reason,
-            "cash_ratio":   cash_ratio,
-            "debt_ratio":   debt_ratio,
-        }
-        blok_data_pasaran = ""
-
-        if ticker:
-            # LANGKAH 1: Ambil data harga + asas + sentimen sebelum swarm berjalan
-            # (ini menyelesaikan masalah "data unavailable" dalam agen)
             try:
-                # yfinance/Finnhub want "ETH-USD"/"BTC-USD", not the bare
-                # "ETH"/"BTC" the Thetanuts CLI takes — `ticker` stays bare
-                # everywhere else (Thetanuts calls, Firestore logs, swarm
-                # labeling); this is purely the symbol used for the market
-                # data lookup. UNVERIFIED: confirm bina_data_kuantitatif()
-                # (in news_fetcher.py, not reviewed here) actually resolves
-                # this format the same way it resolves stock tickers.
-                market_symbol = f"{ticker}-USD" if ticker in ("ETH", "BTC") else ticker
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    kuantitatif = loop.run_until_complete(
-                        bina_data_kuantitatif(market_symbol, is_compliant, reason)
-                    )
-                finally:
-                    loop.close()
+                # Run the full 5-agent pipeline (Technical, Fundamental, News, Risk, Committee)
+                investment_analysis = self.swarm_engine.analyze_stock_sync(sym, user_question=user_input)
 
-                blok_data_pasaran = format_data_untuk_prompt(kuantitatif)
-                print(f"✅ Quantitative data successfully retrieved for {ticker}")
+                # Format a clean, professional executive summary for the text bubble
+                decision = investment_analysis.get("decision", "HOLD")
+                conf_pct = int(investment_analysis.get("confidence", 0.5) * 100)
+                risk_lvl = investment_analysis.get("risk_level", "MEDIUM")
+                summary = investment_analysis.get("summary", "")
+                bulls = investment_analysis.get("bull_case", [])
+                bears = investment_analysis.get("bear_case", [])
 
-            except Exception as e:
-                print(f"⚠️ Failed to retrieve quantitative data: {e}")
-                # Fallback ke dict asas jika gagal
-                kuantitatif = {
-                    "is_compliant": is_compliant,
-                    "reason":       reason,
-                    "cash_ratio":   cash_ratio,
-                    "debt_ratio":   debt_ratio,
+                summary_md = f"### 📊 Investment Assessment: {canonical_name} ({sym})\n\n"
+                summary_md += f"**Committee Decision:** `{decision}` (Evidence Conviction: **{conf_pct}%**) · Risk Level: **{risk_lvl}**\n\n"
+                summary_md += f"{summary}\n\n"
+
+                if bulls:
+                    summary_md += f"**Key Catalyst:** {bulls[0]}\n"
+                if bears:
+                    summary_md += f"**Primary Concern:** {bears[0]}\n\n"
+
+                summary_md += "_Explore the full multi-agent breakdown, bull/bear cases, chart, and invalidation triggers in the research card below._"
+
+                return {
+                    "status":              "SUCCESS",
+                    "response_type":       "investment_intelligence",
+                    "final_advice":        summary_md,
+                    "investment_analysis": investment_analysis,
+                    "trade_proposal":      None,
                 }
 
-            # LANGKAH 2: Ambil data tambahan dari Finnhub untuk swarm
-            quote_data = {
-                "price": kuantitatif.get("harga_semasa"),
-                "changePercent": kuantitatif.get("perubahan_harga_pct"),
-                "high": kuantitatif.get("tinggi_52_minggu"),
-                "low": kuantitatif.get("rendah_52_minggu"),
-                "previousClose": None 
-            } if kuantitatif.get("data_harga_tersedia") else None
-
-            fundamentals = {
-                "peRatio": kuantitatif.get("nisbah_pe"),
-                "marketCap": kuantitatif.get("permodalan_pasaran"),
-                "netProfitMargin": kuantitatif.get("margin_keuntungan"),
-                "debtToEquity": (kuantitatif.get("nisbah_hutang") * 100) if kuantitatif.get("nisbah_hutang") else None
-            } if kuantitatif.get("data_harga_tersedia") else None
-
-            sentiment = {
-                "buzz": kuantitatif.get("bilangan_artikel_berita"),
-                "news_score": kuantitatif.get("skor_sentimen"),
-                "social_score": kuantitatif.get("skor_sentimen")
-            } if kuantitatif.get("data_sentimen_tersedia") else None
-
-            # LANGKAH 3: Jalankan swarm dengan data yang telah dipetakan
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    raw_swarm_results = loop.run_until_complete(
-                        self.swarm_engine.execute_rehearsal(
-                            ticker       = ticker,
-                            audit_data   = kuantitatif,
-                            user_goal    = user_goal,
-                            quote_data   = quote_data,       
-                            fundamentals = fundamentals,     
-                            sentiment    = sentiment,        
-                        )
-                    )
-                finally:
-                    loop.close()
-
-                structured_consensus = calculate_swarm_consensus(
-                    raw_swarm_results,
-                    previous_consensus=previous_consensus,
-                )
-                print(
-                    f"📊 Swarm Consensus: {structured_consensus['consensus']} "
-                    f"at {structured_consensus['confidence']}%"
-                )
-                self._consensus_history[ticker] = structured_consensus
-
-                # ── START: WALLET-AWARE SIZING & THETANUTS ON-CHAIN EXECUTION ──────
-                consensus_action = structured_consensus.get("consensus", "").upper()
-                confidence = structured_consensus.get("confidence", 0)
-                prefs = preferences or {}
-                risk_tolerance = prefs.get("riskTolerance", "Moderate")
-
-                # Premium budget as a % of TRADABLE (real, live) USDC — tiered by
-                # risk tolerance. This replaces the old share-based sizing, which
-                # assumed a stock portfolio value that no longer exists; on
-                # Thetanuts, max loss is capped at the premium paid, so sizing is
-                # simply "how much of the wallet's live USDC to put on this trade".
-                RISK_PCT_BY_TOLERANCE = {"Low (Conservative)": 0.10, "Moderate": 0.20, "High (Aggressive)": 0.35}
-                risk_pct = RISK_PCT_BY_TOLERANCE.get(risk_tolerance, 0.20)
-
-                tradable_usdc = wallet_balance.get("tradable_usdc", 0.0)
-                proposed_amount = round(tradable_usdc * risk_pct, 4)
-
-                # riskCopilotMode governs whether ANY on-chain action is
-                # taken here without a separate, explicit user confirmation.
-                # Only "Fully automated recommendations" is allowed to reach
-                # execute_fill(dry_run=False) from this code path — every
-                # other mode either stays purely informational or stops at
-                # a preview that /confirm-trade must be called to complete.
-                copilot_mode = prefs.get("riskCopilotMode", "Suggest actions, I confirm each one")
-
-                trade_proposal = {
-                    "action": consensus_action,
-                    "ticker": ticker,
-                    "confidence": confidence,
-                    "risk_tolerance": risk_tolerance,
-                    "risk_copilot_mode": copilot_mode,
-                    "wallet_tradable_usdc": tradable_usdc,
-                    "proposed_amount_usdc": proposed_amount,
-                }
-
-                execution_record = None
-
-                if consensus_action in ["BUY", "SELL"] and confidence >= 50:
-
-                    # ── Mode 1: Alert me only, I act manually ───────────────
-                    # No CLI call at all — not even a dry-run preview. The
-                    # user asked to be told, not shown a simulated fill.
-                    if copilot_mode == "Alert me only, I act manually":
-                        print(f"🔔 [Thetanuts] Alert-only mode — surfacing {consensus_action} {ticker} without previewing or filling.")
-                        trade_proposal["thetanuts_execution"] = {
-                            "status": "ALERT_ONLY",
-                            "reason": "Risk Copilot is set to alert-only — no order was previewed or sent. Trade manually on Thetanuts if you agree with this signal.",
-                        }
-                        execution_record = {
-                            "ticker": ticker, "action": consensus_action, "confidence": confidence,
-                            "status": "ALERT_ONLY", "amount_usdc": 0,
-                            "order_index": None, "tx_hash": None,
-                            "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
-                        }
-
-                    elif not wallet_balance.get("ok") or tradable_usdc < 0.5:
-                        # No point calling the CLI at all — we already know it'll fail.
-                        print(f"⏭️ [Thetanuts] Skipping execution — wallet balance unavailable or below 0.5 USDC (have {tradable_usdc}).")
-                        trade_proposal["thetanuts_execution"] = {
-                            "status": "SKIPPED_INSUFFICIENT_FUNDS",
-                            "tradable_usdc": tradable_usdc,
-                        }
-                        execution_record = {
-                            "ticker": ticker, "action": consensus_action, "confidence": confidence,
-                            "status": "SKIPPED_INSUFFICIENT_FUNDS", "amount_usdc": 0,
-                            "order_index": None, "tx_hash": None,
-                            "wallet_tradable_usdc": tradable_usdc, "dry_run": False,
-                        }
-
-                    else:
-                        print(f"🚀 [Thetanuts] {copilot_mode} — resolving book for {consensus_action} {ticker} at {proposed_amount} USDC...")
-                        # Filtered to `ticker` — previously this fetched the
-                        # WHOLE book and took index [0] regardless of asset,
-                        # so a BUY/SELL decided about one underlying could
-                        # fill a completely unrelated order. Only ETH/BTC
-                        # orders for the asset the swarm just analyzed come
-                        # back here.
-                        orders = trader.get_live_orders(underlying=ticker)
-
-                        if orders.get("ok") and isinstance(orders.get("data"), list) and len(orders["data"]) > 0:
-                            target_order = orders["data"][0]
-
-                            # Prefer the explicit selector (pins the exact
-                            # contract) over --order-index (position-based,
-                            # only correct if it resolves against the same
-                            # filtered list — unverified against a live
-                            # response). Field names below are a best guess
-                            # from the CLI's own flag names — confirm with
-                            # one real `book orders --underlying ETH -o json`
-                            # dry run and adjust if they don't match.
-                            order_type   = target_order.get("type") or target_order.get("optionType")
-                            order_strike = target_order.get("strike")
-                            order_expiry = target_order.get("expiry") or target_order.get("expiryTimestamp")
-                            order_price  = target_order.get("price") or target_order.get("premium")
-                            has_schema   = order_type and order_strike is not None and order_expiry
-
-                            # ── Mode 2: Suggest actions, I confirm each one ──
-                            # Preview only (always dry_run=True — this mode
-                            # must NEVER fill on its own). Hand back the exact
-                            # selector so the frontend can send it to
-                            # /confirm-trade, which re-checks the book fresh
-                            # at confirmation time before ever filling for
-                            # real.
-                            if copilot_mode == "Suggest actions, I confirm each one":
-                                if has_schema:
-                                    preview_result = trader.execute_fill(
-                                        collateral_usdc=proposed_amount,
-                                        underlying=ticker,
-                                        option_type=order_type,
-                                        strike=order_strike,
-                                        expiry=order_expiry,
-                                        dry_run=True,
-                                    )
-                                else:
-                                    print("⚠️ [Thetanuts] Order fields didn't match expected schema — previewing with --order-index 0 (unverified).")
-                                    preview_result = trader.execute_fill(
-                                        collateral_usdc=proposed_amount,
-                                        order_index=0,
-                                        dry_run=True,
-                                    )
-
-                                trade_proposal["thetanuts_execution"] = {
-                                    "status": "PENDING_CONFIRMATION",
-                                    "preview": preview_result,
-                                }
-                                # Everything /confirm-trade needs to re-fetch
-                                # the book and refill this exact contract —
-                                # never the stale preview_result itself.
-                                trade_proposal["confirm_selector"] = {
-                                    "underlying": ticker,
-                                    "option_type": order_type,
-                                    "strike": order_strike,
-                                    "expiry": order_expiry,
-                                    "collateral_usdc": proposed_amount,
-                                    "previewed_price": order_price,
-                                }
-                                execution_record = {
-                                    "ticker": ticker, "action": consensus_action, "confidence": confidence,
-                                    "status": "PENDING_CONFIRMATION", "amount_usdc": proposed_amount,
-                                    "order_index": None, "tx_hash": None,
-                                    "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
-                                }
-                                print(f"⏸️ [Thetanuts] Preview only — waiting on user confirmation via /confirm-trade.")
-
-                            # ── Mode 3: Fully automated recommendations ──────
-                            # The only mode allowed to reach a real fill from
-                            # this code path. Still forced through dry_run
-                            # while FORCE_DRY_RUN is True (wallet unfunded).
-                            else:
-                                effective_dry_run = FORCE_DRY_RUN
-                                if effective_dry_run:
-                                    print("🧪 [Thetanuts] FORCE_DRY_RUN is on — running as a dry-run even in fully-automated mode.")
-
-                                if has_schema:
-                                    execution_result = trader.execute_fill(
-                                        collateral_usdc=proposed_amount,
-                                        underlying=ticker,
-                                        option_type=order_type,
-                                        strike=order_strike,
-                                        expiry=order_expiry,
-                                        dry_run=effective_dry_run,
-                                    )
-                                else:
-                                    print("⚠️ [Thetanuts] Order fields didn't match expected schema — falling back to --order-index 0 (unverified).")
-                                    execution_result = trader.execute_fill(
-                                        collateral_usdc=proposed_amount,
-                                        order_index=0,
-                                        dry_run=effective_dry_run,
-                                    )
-
-                                trade_proposal["thetanuts_execution"] = execution_result
-                                execution_record = {
-                                    "ticker": ticker, "action": consensus_action, "confidence": confidence,
-                                    "status": execution_result["status"], "amount_usdc": proposed_amount,
-                                    "order_index": execution_result.get("order_index"), "tx_hash": execution_result["tx_hash"],
-                                    "wallet_tradable_usdc": tradable_usdc, "dry_run": effective_dry_run,
-                                    "error": execution_result["error"],
-                                }
-                                if execution_result["ok"]:
-                                    print(f"✅ [Thetanuts] {'Dry-run' if effective_dry_run else 'Live'} trade result: {execution_result}")
-                                else:
-                                    print(f"❌ [Thetanuts] Trade failed: {execution_result['error']}")
-                        else:
-                            print("⚠️ [Thetanuts] No active orders available on OptionBook to fill.")
-                            trade_proposal["thetanuts_execution"] = {
-                                "status": "FAILED",
-                                "reason": orders.get("error") or "No active orders on OptionBook",
-                            }
-                            execution_record = {
-                                "ticker": ticker, "action": consensus_action, "confidence": confidence,
-                                "status": "FAILED", "amount_usdc": 0, "order_index": None, "tx_hash": None,
-                                "wallet_tradable_usdc": tradable_usdc, "dry_run": True,
-                                "error": orders.get("error") or "No active orders on OptionBook",
-                            }
-
-                # Every attempt gets logged — success, failure, or skip — so the
-                # history is a complete record, not just a highlight reel.
-                if execution_record is not None:
-                    _log_thetanuts_trade(execution_record)
-                # ── END: WALLET-AWARE SIZING & EXECUTION ────────────────────────
-
             except Exception as e:
-                print(f"⚠️ AI Swarm failed: {e}")
-                structured_consensus = None
+                print(f"⚠️ [AIAgent] Multi-Agent Pipeline error for {sym}: {e}")
 
-        else:
-            # Tiada ticker → soalan am → skip swarm sepenuhnya
-            print("ℹ️ Tiada ticker dikesan — swarm diskip, balas soalan am.")
-
-        # ── Bina prompt ───────────────────────────────────────────────────────
-        prompt_content = self.prompt_engine.format_agent_input(
-            input_pengguna    = user_input,
-            kuantitatif       = kuantitatif,
-            konteks_halaman   = page_context,
-            konsensus_teratur = structured_consensus,
-            blok_data_pasaran = blok_data_pasaran,
-        )
+        # ── 3. GENERAL CONVERSATION / GENERAL FINANCE QUESTION ────────────────
+        print(f"ℹ️ [AIAgent] General financial inquiry. Generating conversational guidance...")
+        system_prompt = self.prompt_engine.get_system_prompt(preferences, wallet_balance={"ok": False})
+        prompt_content = f"User Question: {user_input}\nContext: {page_context}\nPlease provide a helpful, professional, and structured financial response."
 
         return self.build_final_response(
             system_prompt,
             prompt_content,
             chat_history,
-            kuantitatif,
-            trade_proposal
+            shariah_result="NOT_PERFORMED",
+            trade_proposal=None,
         )
 
-    def build_final_response(self, system_prompt, prompt_content, chat_history, shariah_result, trade_proposal):
+    def build_final_response(self, system_prompt, prompt_content, chat_history, shariah_result, trade_proposal, investment_analysis=None):
         messages = [{"role": "system", "content": system_prompt}]
 
         if chat_history:
@@ -568,13 +228,28 @@ class AIAgent:
                 if not final_advice:
                     raise ValueError("Content blocked or missing in response (likely AI safety filter).")
 
+                # Strip <think>...</think> reasoning blocks emitted by Qwen3/DeepSeek
+                # thinking models — users should only see the final answer.
+                import re as _re
+                # Strip <think>...</think> reasoning blocks (Qwen3 / DeepSeek thinking models).
+                # Pass 1: remove any complete <think>...</think> sections (DOTALL = across newlines)
+                final_advice = _re.sub(r"<think>.*?</think>", "", final_advice, flags=_re.DOTALL)
+                # Pass 2: remove any unclosed leading <think> block (model may not close it before answer)
+                final_advice = _re.sub(r"<think>.*$", "", final_advice, flags=_re.DOTALL)
+                # Pass 3: remove stray </think> tags left behind
+                final_advice = final_advice.replace("</think>", "").strip()
+
+                if not final_advice:
+                    raise ValueError("Model returned only a thinking block with no final answer.")
+
                 print(f"✅ [AIAgent] Successfully passed through {provider['name']}")
 
                 return {
-                    "status":       "SUCCESS",
-                    "final_advice": final_advice,
-                    "raw_data":     {"shariah_status": shariah_result},
-                    "trade_proposal": trade_proposal
+                    "status":              "SUCCESS",
+                    "final_advice":        final_advice,
+                    "raw_data":            {"shariah_status": shariah_result},
+                    "trade_proposal":      trade_proposal,
+                    "investment_analysis": investment_analysis,
                 }
 
             except Exception as e:

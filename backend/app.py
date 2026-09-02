@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -6,6 +7,15 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Force UTF-8 on Windows stdout/stderr to prevent cp1252 charmap encoding crashes
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 load_dotenv()
 # Import your route blueprints
 from portfolio_routes import portfolio_bp
@@ -13,6 +23,7 @@ from market_routes import market_bp
 from zakat_endpoints import zakat_bp
 from ai_routes import ai_bp
 from wallet_routes import wallet_bp
+from investment_routes import investment_bp
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +50,7 @@ app.register_blueprint(market_bp, url_prefix='/api/stocks/market')
 app.register_blueprint(zakat_bp, url_prefix='/api/zakat')
 app.register_blueprint(ai_bp, url_prefix='/api/aiagent/ai')
 app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
+app.register_blueprint(investment_bp, url_prefix='/api/investment')
 
 @app.route('/', methods=['GET'])
 def home():

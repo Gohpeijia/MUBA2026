@@ -10,6 +10,7 @@ import StockSearchBar  from './components/StockSearchBar';
 import StockHeader     from './components/StockHeader';
 import StockChart      from './components/StockChart';
 import StockDetails    from './components/StockDetails';
+import InvestmentIntelligenceCard from './components/InvestmentIntelligenceCard';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    CONFIG
@@ -148,6 +149,42 @@ export default function Stocks() {
   const [details,       setDetails]       = useState(null);
   const [detailsLoading,setDetailsLoading]= useState(false);
 
+  // AI Multi-Agent Intelligence
+  const [aiAnalysis,    setAiAnalysis]    = useState(null);
+  const [aiLoading,     setAiLoading]     = useState(false);
+  const [aiError,       setAiError]       = useState(null);
+
+  /* ── Trigger Multi-Agent Investment Intelligence ── */
+  const handleRunAIAnalysis = useCallback(async () => {
+    if (!activeTicker) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      let headers = { 'Content-Type': 'application/json' };
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/investment/analyze`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ symbol: activeTicker, question: `Evaluate investment outlook for ${activeTicker}` })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setAiAnalysis(json.data);
+      } else {
+        setAiError(json.error || 'Failed to complete multi-agent analysis.');
+      }
+    } catch (err) {
+      console.error('Multi-Agent Analysis Error:', err);
+      setAiError(err.message || 'Network error calling multi-agent engine.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [activeTicker]);
+
   /* ── Firebase: load watchlist on login ── */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -238,6 +275,8 @@ export default function Stocks() {
     setQuote(null);
     setChartData(null);
     setDetails(null);
+    setAiAnalysis(null);
+    setAiError(null);
     setPeriod('1Y');
     setErrorMsg(null);
   }, []);
@@ -353,6 +392,119 @@ export default function Stocks() {
               details={details}
               loading={detailsLoading}
             />
+
+            {/* ── AMANAH MULTI-AGENT INVESTMENT INTELLIGENCE ── */}
+            <div style={{ marginTop: '1.25rem', marginBottom: '1.5rem' }}>
+              {!aiAnalysis && !aiLoading && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(26,107,107,0.06), rgba(26,107,107,0.12))',
+                  border: '1.5px dashed var(--teal, #1a6b6b)',
+                  borderRadius: 12,
+                  padding: '1.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, fontSize: '1rem', color: 'var(--teal, #1a6b6b)' }}>
+                      <span>🧠</span>
+                      <span>Amanah Multi-Agent Investment Intelligence</span>
+                    </div>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted, #64748b)' }}>
+                      Launch independent 5-agent deliberation (Technical, Fundamental, News, Devil's Advocate, and Committee).
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleRunAIAnalysis}
+                    style={{
+                      background: 'var(--teal, #1a6b6b)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '0.65rem 1.25rem',
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      boxShadow: '0 2px 8px rgba(26,107,107,0.25)',
+                      transition: 'transform 0.15s ease, background 0.15s ease',
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.03)'}
+                    onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1.0)'}
+                  >
+                    <span>⚡ Run 5-Agent Analysis</span>
+                  </button>
+                </div>
+              )}
+
+              {aiLoading && (
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1.5px solid var(--border, #e2e8f0)',
+                  borderRadius: 12,
+                  padding: '1.5rem',
+                  textAlign: 'center',
+                  color: 'var(--teal, #1a6b6b)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                }}>
+                  <div style={{ fontSize: '1.5rem', animation: 'spin 1.5s linear infinite' }}>🧠</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                    Multi-Agent Intelligence System Deliberating...
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)' }}>
+                    Concurrently executing Technical, Fundamental, and News agents $\rightarrow$ Adversarial Risk Challenge $\rightarrow$ Investment Committee Synthesis
+                  </div>
+                </div>
+              )}
+
+              {aiError && (
+                <div style={{
+                  background: '#fef2f2',
+                  border: '1px solid #dc2626',
+                  color: '#dc2626',
+                  borderRadius: 8,
+                  padding: '0.75rem 1rem',
+                  fontSize: '0.85rem',
+                  marginTop: '0.5rem',
+                }}>
+                  ⚠️ {aiError}
+                </div>
+              )}
+
+              {aiAnalysis && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--teal, #1a6b6b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      AI Multi-Agent Research Dossier
+                    </span>
+                    <button
+                      onClick={handleRunAIAnalysis}
+                      style={{
+                        background: 'none',
+                        border: '1px solid var(--border, #cbd5e1)',
+                        borderRadius: 6,
+                        padding: '0.25rem 0.6rem',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted, #64748b)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      🔄 Re-Analyze
+                    </button>
+                  </div>
+                  <InvestmentIntelligenceCard data={aiAnalysis} />
+                </div>
+              )}
+            </div>
           </>
         )}
       </main>

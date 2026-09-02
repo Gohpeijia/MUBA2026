@@ -64,7 +64,10 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
     - Purata bergerak 50 hari & 200 hari
     """
     ticker_bersih = ticker.upper().replace(".KL", "")
-    simbol_yahoo = PETA_TICKER_BURSA.get(ticker_bersih, f"{ticker_bersih}.KL")
+    if ticker_bersih in ("ETH", "BTC", "ETH-USD", "BTC-USD") or "-USD" in ticker_bersih:
+        simbol_yahoo = f"{ticker_bersih.replace('-USD', '')}-USD"
+    else:
+        simbol_yahoo = PETA_TICKER_BURSA.get(ticker_bersih, f"{ticker_bersih}.KL")
 
     try:
         saham = yf.Ticker(simbol_yahoo)
@@ -169,7 +172,11 @@ async def ambil_sentimen_berita(ticker: str) -> dict:
     Mengembalikan skor 0.0–1.0 dan label Melayu.
     """
     ticker_bersih = ticker.upper().replace(".KL", "")
-    simbol = PETA_TICKER_FINNHUB.get(ticker_bersih, f"{ticker_bersih}.KL")
+    if ticker_bersih in ("ETH", "BTC", "ETH-USD", "BTC-USD") or "-USD" in ticker_bersih:
+        clean_crypto = ticker_bersih.replace("-USD", "")
+        simbol = f"BINANCE:{clean_crypto}USDT"
+    else:
+        simbol = PETA_TICKER_FINNHUB.get(ticker_bersih, f"{ticker_bersih}.KL")
     url    = "https://finnhub.io/api/v1/news-sentiment"
     params = {"symbol": simbol, "token": YOUR_FINNHUB_API_KEY}
 

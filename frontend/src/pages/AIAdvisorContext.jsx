@@ -210,7 +210,11 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
 
     if (data.success && data.data) {
       if (data.data.final_advice) {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.data.final_advice }]);
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: data.data.final_advice,
+          investmentAnalysis: data.data.investment_analysis || null,
+        }]);
       }
       
       // Extract trade proposal when backend risk analysis outputs execution recommendation

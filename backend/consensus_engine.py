@@ -24,8 +24,18 @@ def calculate_swarm_consensus(
     - ISSUE #5: Temporal layer — confidence_delta, trend_direction, sentiment_velocity.
     """
 
-    # ── 1. FILTER FAILURES ───────────────────────────────────────────────────
-    valid_results = [r for r in swarm_results if r.get("decision") not in ("ERROR", None)]
+    # ── 1. FILTER FAILURES + SEPARATE COMMITTEE VERDICT ──────────────────────
+    # The Committee agent has no weight field (it's a judge, not a voter).
+    # Separate it out before any voting math so it doesn't skew consensus.
+    committee_verdict = next(
+        (r for r in swarm_results if r.get("agent") == "INVESTMENT_COMMITTEE"), None
+    )
+    valid_results = [
+        r for r in swarm_results
+        if r.get("decision") not in ("ERROR", None)
+        and r.get("agent") != "INVESTMENT_COMMITTEE"
+        and r.get("weight") is not None      # weight=None marks non-voters
+    ]
 
     if not valid_results:
         return _empty_result(previous_consensus)
@@ -35,6 +45,7 @@ def calculate_swarm_consensus(
     veto_events  = [r for r in valid_results if r["decision"] == "VETO"]
     market_votes = [r for r in valid_results if r["decision"] != "VETO"]
     veto_triggered = len(veto_events) > 0
+
 
     # ── 3. TALLY WEIGHTED MARKET SCORES ──────────────────────────────────────
     scores = {"BUY": 0.0, "HOLD": 0.0, "SELL": 0.0}
@@ -223,9 +234,16 @@ def calculate_swarm_consensus(
         # All None on first call; populated once previous_consensus is passed in.
         **temporal,
 
+        # ── Committee Verdict (NEW) ────────────────────────────────────────
+        # The Investment Committee's deliberated final summary.
+        # None if the orchestrator didn't include a committee agent.
+        "committee_verdict":    committee_verdict,
+
         # ── Explainability (keep forever) ──────────────────────────────────
+        # Now includes bullish_factors + bearish_factors per agent.
         "agent_breakdown":      valid_results,
     }
+
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -316,6 +334,7 @@ def _empty_result(previous_consensus: Optional[dict]) -> dict:
         "conflict_detected":          False,
         "market_state":               "SWARM_FAILURE",
         "minority_warning":           "All agents failed to respond.",
+        "committee_verdict":          None,
         "agent_breakdown":            [],
         **temporal,
-    }
+    }
