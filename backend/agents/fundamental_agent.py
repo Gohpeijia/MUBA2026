@@ -13,26 +13,41 @@ from agents.base_agent import BaseAgent
 
 
 FUNDAMENTAL_SYSTEM_PROMPT = """You are the Fundamental Analysis Agent.
+
 Analyze the company's financial health, business quality, and valuation.
 
 Time Horizon: MEDIUM_LONG_TERM
 
-Evaluate:
-- Revenue and Revenue growth
-- Earnings growth and EPS
-- Profitability and Net profit margins
-- Return on Equity (ROE)
-- Debt-to-Equity and balance sheet stability
-- Free Cash Flow
-- Valuation (P/E ratio, Market Cap) — evaluate ONLY if applicable (e.g. not applicable for loss-making or crypto)
+IMPORTANT DATA RULES:
 
-Strict Behavioral Rules:
-1. Separate: Business quality, Financial strength, Valuation.
-2. Do NOT make the final BUY/HOLD/SELL decision.
-3. Never invent financial figures. If a metric is null/unavailable, explicitly state that it is unavailable.
-4. If the asset is Crypto (e.g. ETH, BTC), set ratings to "NOT_APPLICABLE" and state that traditional corporate statements do not apply.
-5. Every important claim must reference supplied figures.
-6. Return ONLY valid JSON matching the exact schema below.
+1. Use ONLY financial figures explicitly supplied in the CANONICAL FUNDAMENTAL SNAPSHOT.
+2. Never recall financial figures from your pretrained knowledge.
+3. Never estimate or substitute a different P/E, margin, ROE, debt ratio, revenue, or growth rate.
+4. If a metric is null or unavailable, mark it UNKNOWN.
+5. Missing data is NOT negative evidence.
+6. Do not use excluded or suspicious provider fields.
+7. Never mention a financial metric that is not present in the canonical snapshot.
+8. Do not claim that a ratio is above/below an industry average unless an explicit industry benchmark is supplied.
+9. Do NOT make the final BUY/HOLD/SELL decision.
+10. Every important numerical claim must match the supplied value exactly.
+
+Evaluate:
+- Revenue
+- Revenue growth
+- Earnings growth
+- EPS
+- Profit margin
+- ROE
+- Debt-to-equity
+- Free cash flow
+- P/E
+- Market capitalization
+- Valuation condition
+
+For crypto:
+- Traditional corporate fundamentals are NOT_APPLICABLE.
+
+Return ONLY valid JSON.
 
 Required JSON Schema:
 {
@@ -50,22 +65,29 @@ Required JSON Schema:
     "rating": "FAIR",
     "confidence": 0.64
   },
-  "bullish_factors": ["Healthy net profit margin >15%", "Positive revenue growth YoY"],
-  "bearish_factors": ["Debt-to-equity ratio above industry average"],
+  "bullish_factors": [],
+  "bearish_factors": [],
   "evidence": [
     {
-      "claim": "Profit margin is 16.2%",
-      "field": "profit_margin",
-      "value": 16.2
+      "claim": "Profit margin is 63.66%",
+      "field": "profit_margin_pct",
+      "value": 63.66
     }
   ]
 }
 
 Allowed Ratings:
-- business_quality: "STRONG", "MODERATE", "WEAK", "NOT_APPLICABLE"
-- financial_health: "HEALTHY", "MODERATE", "DISTRESSED", "NOT_APPLICABLE"
-- valuation: "UNDERVALUED", "FAIR", "OVERVALUED", "NOT_APPLICABLE"
-confidence: Float between 0.0 and 1.0 (evidence strength)
+business_quality:
+"STRONG", "MODERATE", "WEAK", "NOT_APPLICABLE"
+
+financial_health:
+"HEALTHY", "MODERATE", "DISTRESSED", "NOT_APPLICABLE"
+
+valuation:
+"UNDERVALUED", "FAIR", "OVERVALUED", "NOT_APPLICABLE"
+
+confidence:
+Float between 0.0 and 1.0.
 """
 
 
@@ -159,20 +181,29 @@ class FundamentalAgent(BaseAgent):
 
         # Single equity evaluation
         pe = funds.get("pe_ratio")
-        margin = funds.get("profit_margins")
+        margin_pct = funds.get("profit_margin_pct")
         de = funds.get("debt_to_equity")
 
         bullish_factors = []
         bearish_factors = []
 
-        if margin is not None and margin > 0.15:
-            bullish_factors.append(f"Healthy net profit margin at {margin * 100:.1f}%.")
+        if margin_pct is not None and margin_pct > 15:
+            bullish_factors.append(
+                f"Healthy net profit margin at {margin_pct:.2f}%."
+            )
             bq_rating = "STRONG"
-        elif margin is not None and margin < 0.05:
-            bearish_factors.append(f"Compressed net profit margin at {margin * 100:.1f}%.")
+
+        elif margin_pct is not None and margin_pct < 5:
+            bearish_factors.append(
+                f"Compressed net profit margin at {margin_pct:.2f}%."
+            )
             bq_rating = "WEAK"
-        else:
+
+        elif margin_pct is not None:
             bq_rating = "MODERATE"
+
+        else:
+            bq_rating = "NOT_APPLICABLE"
 
         if de is not None and de < 1.0:
             bullish_factors.append(f"Conservative leverage with Debt-to-Equity of {de:.2f}.")
@@ -197,32 +228,72 @@ class FundamentalAgent(BaseAgent):
             "status": "SUCCESS",
             "time_horizon": "MEDIUM_LONG_TERM",
             "provider_used": "Programmatic Fundamentals Engine (Deterministic Fallback)",
-            "business_quality": {"rating": bq_rating, "confidence": 0.75, "notes": f"Evaluated based on profitability margins."},
+            "business_quality": {"rating": bq_rating, "confidence": 0.75 if margin_pct is not None else 0.45, "notes": f"Evaluated based on profitability margins."},
             "financial_health": {"rating": fh_rating, "confidence": 0.75, "notes": f"Evaluated based on balance sheet leverage."},
             "valuation": {"rating": val_rating, "confidence": 0.75, "notes": f"Evaluated based on P/E multiples."},
             "bullish_factors": bullish_factors if bullish_factors else ["Financial operations maintain baseline stability."],
             "bearish_factors": bearish_factors if bearish_factors else ["Sector competition requires ongoing capital investment."],
             "evidence": [
-                {"claim": f"Trailing P/E is {pe}", "field": "pe_ratio", "value": pe},
-                {"claim": f"Profit margin is {margin}", "field": "profit_margins", "value": margin},
-            ]
+            {
+                "claim": f"Trailing P/E is {pe}",
+                "field": "pe_ratio",
+                "value": pe,
+            },
+            {
+                "claim": f"Profit margin is {margin_pct}%",
+                "field": "profit_margin_pct",
+                "value": margin_pct,
+            },
+            ]       
         }
 
-    async def run(self, session: aiohttp.ClientSession, market_snapshot: Dict[str, Any], analysis_id: str = "local") -> Dict[str, Any]:
-        """
-        Runs Fundamental Analysis on normalized market snapshot.
-        Falls back to programmatic fundamentals engine if LLMs fail.
-        """
+    async def run(
+    self,
+    session: aiohttp.ClientSession,
+    market_snapshot: Dict[str, Any],
+    analysis_id: str = "local",
+    screening_result: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+
+        screening_result = screening_result or {}
+
+        asset_type = market_snapshot.get(
+            "asset_type"
+        )
+
         payload = {
-            "symbol":        market_snapshot.get("symbol"),
-            "company_name":  market_snapshot.get("company_name"),
-            "asset_type":    market_snapshot.get("asset_type"),
-            "currency":      market_snapshot.get("currency"),
-            "fundamentals":  market_snapshot.get("fundamentals", {}),
-            "data_quality":  market_snapshot.get("data_quality", {}),
+            "canonical_fundamentals": {
+                "symbol": market_snapshot.get("symbol"),
+                "company_name": market_snapshot.get("company_name"),
+                "asset_type": asset_type,
+                "currency": market_snapshot.get("currency"),
+                "fundamentals": market_snapshot.get(
+                    "fundamentals",
+                    {},
+                ),
+                "data_quality": market_snapshot.get(
+                    "data_quality",
+                    {},
+                ),
+            },
+            "quantitative_screen": {
+                "score": screening_result.get("score"),
+                "screening_signal": screening_result.get(
+                    "screening_signal"
+                ),
+                "component_scores": screening_result.get(
+                    "component_scores",
+                    {},
+                ),
+            },
         }
 
-        user_content = f"FUNDAMENTAL DATA SNAPSHOT:\n{json.dumps(payload, indent=2)}\n\nPlease evaluate financial health, business quality, and valuation. Return valid JSON."
+        user_content = (
+            "CANONICAL FUNDAMENTAL DOSSIER:\n"
+            f"{json.dumps(payload, indent=2)}\n\n"
+            "Evaluate only the supplied financial evidence. "
+            "Return valid JSON."
+        )
 
         report = await self.execute_with_validation(
             session=session,
@@ -235,5 +306,12 @@ class FundamentalAgent(BaseAgent):
         if report.get("status") == "SUCCESS":
             return report
 
-        print(f"  🛡️ [{analysis_id}] [fundamental] LLM call unavailable — generating deterministic fundamental report.")
-        return self.generate_fallback_report(market_snapshot)
+        print(
+            f"  🛡️ [{analysis_id}] [fundamental] "
+            "LLM call unavailable — generating deterministic "
+            "fundamental report."
+        )
+
+        return self.generate_fallback_report(
+            market_snapshot
+        )

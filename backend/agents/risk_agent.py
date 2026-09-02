@@ -14,51 +14,61 @@ from typing import Dict, Any, Tuple, Optional
 from agents.base_agent import BaseAgent
 
 
-RISK_SYSTEM_PROMPT = """You are the Risk and Devil's Advocate Agent for an elite AI investment intelligence committee.
-Your explicit job is to CHALLENGE the investment thesis and act as a critical counterweight.
+RISK_SYSTEM_PROMPT = """You are the Risk and Devil's Advocate Agent for an AI investment intelligence committee.
 
-Review the outputs from:
-1. Technical Analysis Agent
-2. Fundamental Analysis Agent
-3. News Intelligence Agent
-4. Raw Quantitative Data & Data Quality Summary
+Your job is to challenge the investment thesis using ONLY the supplied evidence.
 
-Strict Behavioral Rules:
-1. Do NOT simply summarize the other agents.
-2. Actively argue against the strongest bullish case. Even if all analysts are bullish, search for overlooked blindspots.
-3. Identify contradictions across specialist findings (e.g. short-term momentum vs valuation stretch, or strong news vs declining free cash flow).
-4. Identify unverified or weak assumptions.
-5. Identify missing data risks (what don't we know?).
-6. List explicit Invalidation Conditions: exact concrete events that would break the bull thesis (e.g. "Break below SMA-200 support at $150", "Margin contraction below 10% in Q4").
-7. Return ONLY valid JSON matching the exact schema below.
+You receive:
+1. Canonical Market Data
+2. Quantitative Screening
+3. Technical Report
+4. Fundamental Report
+5. News Report
+6. Data Quality
+
+IMPORTANT EVIDENCE RULES:
+
+1. NEVER use outside financial knowledge.
+2. NEVER invent or recall a financial metric.
+3. NEVER replace a supplied value with another remembered value.
+4. If P/E is supplied as 28.47, you MUST use 28.47.
+5. Do not say P/E is 38, 40, 50, etc. unless that exact value appears in the dossier.
+6. Do not mention revenue CAGR, FCF yield, debt-to-EBITDA, market share, earnings consensus, or other metrics unless they are explicitly supplied.
+7. Do not claim that a ratio is high/low versus an industry unless an industry benchmark is supplied.
+8. Missing data is UNKNOWN, not bearish evidence.
+9. No news is NOT negative news.
+10. Distinguish genuine contradictions from simply different time horizons.
+11. Quantitative screening is independent evidence and should be considered.
+12. Risk analysis must challenge the thesis without fabricating risks as facts.
+13. Invalidation conditions must use supplied technical levels when available.
+14. Future events may be described generically, but do not invent numerical thresholds unless supplied.
+15. Return ONLY valid JSON.
+
+Examples of VALID reasoning:
+- "Price is above SMA-50 and SMA-200, but short-term resistance may limit upside."
+- "Fundamental data shows strong revenue growth, while valuation remains dependent on continued earnings growth."
+- "News evidence is unavailable, so news provides no directional confirmation."
+
+Examples of INVALID reasoning:
+- "P/E is 38x" when supplied P/E is 28.47.
+- "Debt-to-EBITDA is above 4x" when debt-to-EBITDA was not supplied.
+- "Revenue consensus was missed by 5%" when no earnings report was supplied.
 
 Required JSON Schema:
 {
   "agent": "risk",
   "risk_level": "MEDIUM",
-  "major_risks": [
-    {
-      "risk": "Valuation Compression Risk",
-      "severity": "HIGH",
-      "explanation": "P/E of 38 leaves minimal margin of safety if earnings growth decelerates."
-    }
-  ],
-  "contradictions": [
-    {
-      "finding": "Technical analyst notes strong upward momentum near 52-week high",
-      "counterpoint": "Fundamental analyst notes net margins contracted 200 bps YoY"
-    }
-  ],
-  "invalidation_conditions": [
-    "Closing daily price breaks below 50-day SMA",
-    "Upcoming earnings report misses top-line revenue consensus by >5%"
-  ],
-  "overall_assessment": "While momentum is supportive in the short term, valuation does not provide adequate margin of safety."
+  "major_risks": [],
+  "contradictions": [],
+  "invalidation_conditions": [],
+  "overall_assessment": ""
 }
 
-Allowed Values:
-- risk_level: "LOW", "MEDIUM", "HIGH", "EXTREME"
-- severity: "LOW", "MEDIUM", "HIGH", "CRITICAL"
+Allowed risk levels:
+"LOW", "MEDIUM", "HIGH", "EXTREME"
+
+Allowed severity:
+"LOW", "MEDIUM", "HIGH", "CRITICAL"
 """
 
 
@@ -150,39 +160,72 @@ class RiskAgent(BaseAgent):
         }
 
     async def run(
-        self,
-        session: aiohttp.ClientSession,
-        market_snapshot: Dict[str, Any],
-        technical_report: Dict[str, Any],
-        fundamental_report: Dict[str, Any],
-        news_report: Dict[str, Any],
-        analysis_id: str = "local",
-    ) -> Dict[str, Any]:
+    self,
+    session: aiohttp.ClientSession,
+    market_snapshot: Dict[str, Any],
+    technical_report: Dict[str, Any],
+    fundamental_report: Dict[str, Any],
+    news_report: Dict[str, Any],
+    screening_result: Optional[Dict[str, Any]] = None,
+    analysis_id: str = "local",
+) -> Dict[str, Any]:
         """
         Runs Adversarial Risk Analysis against the 3 specialist reports and raw data.
         Falls back to rule-based risk synthesis if LLMs fail.
         """
+        screening_result = screening_result or {}
+
         payload = {
-            "symbol":             market_snapshot.get("symbol"),
-            "company_name":       market_snapshot.get("company_name"),
-            "asset_type":         market_snapshot.get("asset_type"),
-            "data_quality":       market_snapshot.get("data_quality", {}).get("overall", "MODERATE"),
-            "technical_report": {
-                "outlook": technical_report.get("outlook", "NEUTRAL"),
-                "confidence": technical_report.get("confidence", 0.5),
-                "signals": technical_report.get("signals", [])[:3],
+            "canonical_market_data": {
+                "symbol": market_snapshot.get("symbol"),
+                "company_name": market_snapshot.get("company_name"),
+                "asset_type": market_snapshot.get("asset_type"),
+                "currency": market_snapshot.get("currency"),
+                "price": market_snapshot.get("price", {}),
+                "technical_indicators": market_snapshot.get(
+                    "technical_indicators",
+                    {},
+                ),
+                "fundamentals": market_snapshot.get(
+                    "fundamentals",
+                    {},
+                ),
             },
-            "fundamental_report": {
-                "rating": fundamental_report.get("business_quality", {}).get("rating", "NOT_APPLICABLE"),
-                "financial_health": fundamental_report.get("financial_health", {}).get("rating", "NOT_APPLICABLE"),
+
+            "quantitative_screen": {
+                "score": screening_result.get("score"),
+                "screening_signal": screening_result.get(
+                    "screening_signal"
+                ),
+                "component_scores": screening_result.get(
+                    "component_scores",
+                    {},
+                ),
+                "signals": screening_result.get(
+                    "signals",
+                    {},
+                ),
             },
-            "news_report": {
-                "overall_sentiment": news_report.get("overall_sentiment", "NEUTRAL"),
-                "thesis_impact": news_report.get("thesis_impact", "NEUTRAL"),
-            },
+
+            "data_quality": market_snapshot.get(
+                "data_quality",
+                {},
+            ),
+
+            "technical_report": technical_report,
+
+            "fundamental_report": fundamental_report,
+
+            "news_report": news_report,
         }
 
-        user_content = f"SPECIALIST ANALYST DOSSIER:\n{json.dumps(payload, indent=2)}\n\nPlease critique the thesis, find contradictions, and identify key downside failure conditions. Return valid JSON."
+        user_content = (
+    "RISK ANALYSIS DOSSIER:\n"
+    f"{json.dumps(payload, indent=2)}\n\n"
+    "Challenge the thesis using only supplied evidence. "
+    "Do not invent financial metrics. "
+    "Return valid JSON."
+)
 
         report = await self.execute_with_validation(
             session=session,

@@ -20,10 +20,12 @@ load_dotenv()
 # Import your route blueprints
 from portfolio_routes import portfolio_bp
 from market_routes import market_bp
-from zakat_endpoints import zakat_bp
 from ai_routes import ai_bp
 from wallet_routes import wallet_bp
 from investment_routes import investment_bp
+from routes.investment_opportunity_routes import opportunities_bp
+from investment.scheduler import init_scheduler
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,10 +49,11 @@ limiter = Limiter(
 # Register the blueprints
 app.register_blueprint(portfolio_bp, url_prefix='/api/stocks/portfolio')
 app.register_blueprint(market_bp, url_prefix='/api/stocks/market')
-app.register_blueprint(zakat_bp, url_prefix='/api/zakat')
 app.register_blueprint(ai_bp, url_prefix='/api/aiagent/ai')
 app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
 app.register_blueprint(investment_bp, url_prefix='/api/investment')
+app.register_blueprint(opportunities_bp)
+
 
 @app.route('/', methods=['GET'])
 def home():
@@ -65,6 +68,7 @@ def health_check():
     return jsonify({"message": "Modular Islamic Stocks API is running! 🐍🚀"})
 
 if __name__ == '__main__':
+    init_scheduler(app)
     port = int(os.environ.get('PORT', 5000))
     # 🟢 NEW: host='0.0.0.0' explicitly set here just in case you run it directly
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -13,27 +13,39 @@ from agents.base_agent import BaseAgent
 
 
 TECHNICAL_SYSTEM_PROMPT = """You are the Technical Analysis Agent for an AI investment research system.
+
 Your role is ONLY to analyze market price behavior.
 
 Time Horizon: SHORT_TERM
 
+You receive:
+1. A CANONICAL MARKET SNAPSHOT
+2. An INDEPENDENT QUANTITATIVE SCREEN
+
+IMPORTANT DATA RULES:
+- Use ONLY numbers and facts explicitly supplied in the dossier.
+- Never recall, estimate, infer, or substitute outside financial data.
+- Never invent a price, moving average, RSI, MACD value, volume, volatility, support, or resistance level.
+- If a value is null or unavailable, treat it as UNKNOWN.
+- Missing data is NOT bearish evidence.
+- Do not make the final BUY/HOLD/SELL decision.
+- The quantitative screen is supporting evidence, not a final investment decision.
+- Do not claim that momentum is missing when the supplied quantitative or technical data demonstrates momentum.
+- Every important factual conclusion must reference the supplied field/value.
+
 Analyze:
 - Price momentum
 - Trend
-- RSI (pre-computed 14-period)
-- MACD (pre-computed line, signal, histogram)
-- Moving averages (SMA 20, 50, 200, crossover signals)
-- Volume and 30-day average volume
-- Realized Volatility (30-day annualized)
-- Potential support and resistance levels
-- Bullish and bearish signals
+- RSI
+- MACD
+- SMA 20 / 50 / 200
+- Crossover signals
+- Volume
+- Volatility
+- Support/resistance
+- Quantitative screening result
 
-Strict Behavioral Rules:
-1. Do NOT make the final BUY/HOLD/SELL decision.
-2. Do NOT invent missing data. If an indicator is null, state that it is unavailable.
-3. Every important conclusion must reference the supplied technical data.
-4. Separate facts (e.g. "RSI is 63.2") from interpretation.
-5. Return ONLY valid JSON matching the exact schema below with no extra text or markdown fences.
+Return ONLY valid JSON matching the required schema.
 
 Required JSON Schema:
 {
@@ -41,8 +53,8 @@ Required JSON Schema:
   "time_horizon": "SHORT_TERM",
   "outlook": "BULLISH",
   "confidence": 0.76,
-  "bullish_signals": ["Price above SMA-50 and SMA-200", "MACD histogram positive"],
-  "bearish_signals": ["RSI approaching overbought territory at 68.5"],
+  "bullish_signals": [],
+  "bearish_signals": [],
   "evidence": [
     {
       "claim": "Golden cross active",
@@ -53,10 +65,12 @@ Required JSON Schema:
   "key_risk": "Short-term momentum exhaustion near resistance level."
 }
 
-Allowed outlook values: "BULLISH", "BEARISH", "NEUTRAL"
-confidence: Float between 0.0 and 1.0 (evidence strength)
-"""
+Allowed outlook values:
+"BULLISH", "BEARISH", "NEUTRAL"
 
+confidence:
+Float between 0.0 and 1.0 representing evidence strength.
+"""
 
 class TechnicalAgent(BaseAgent):
     AGENT_ID = "technical"
@@ -167,24 +181,47 @@ class TechnicalAgent(BaseAgent):
             "key_risk": "Breakdown below the nearest technical moving average support on elevated volume."
         }
 
-    async def run(self, session: aiohttp.ClientSession, market_snapshot: Dict[str, Any], analysis_id: str = "local") -> Dict[str, Any]:
+    async def run(
+    self,
+    session: aiohttp.ClientSession,
+    market_snapshot: Dict[str, Any],
+    analysis_id: str = "local",
+    screening_result: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
         """
         Runs Technical Analysis on normalized market snapshot.
         Falls back to programmatic technical engine if LLMs fail.
         """
+        screening_result = screening_result or {}
+
         price_info = market_snapshot.get("price", {})
         indicators = market_snapshot.get("technical_indicators", {})
 
         payload = {
-            "symbol":               market_snapshot.get("symbol"),
-            "company_name":         market_snapshot.get("company_name"),
-            "current_price":        price_info.get("current_price"),
-            "change_1d_pct":        price_info.get("change_1d_pct"),
-            "change_30d_pct":       price_info.get("change_30d_pct"),
-            "52w_high":             price_info.get("fifty_two_week_high"),
-            "52w_low":              price_info.get("fifty_two_week_low"),
-            "technical_indicators": indicators,
-        }
+        "canonical_market_data": {
+        "symbol": market_snapshot.get("symbol"),
+        "company_name": market_snapshot.get("company_name"),
+        "current_price": price_info.get("current_price"),
+        "change_1d_pct": price_info.get("change_1d_pct"),
+        "change_30d_pct": price_info.get("change_30d_pct"),
+        "52w_high": price_info.get("fifty_two_week_high"),
+        "52w_low": price_info.get("fifty_two_week_low"),
+        "average_volume": price_info.get("average_volume"),
+        "technical_indicators": indicators,
+        },
+        "quantitative_screen": {
+        "score": screening_result.get("score"),
+        "screening_signal": screening_result.get("screening_signal"),
+        "component_scores": screening_result.get(
+            "component_scores",
+            {},
+        ),
+        "signals": screening_result.get(
+            "signals",
+            {},
+        ),
+    },
+}
 
         user_content = f"TECHNICAL DATA SNAPSHOT:\n{json.dumps(payload, indent=2)}\n\nPlease analyze market price behavior and return valid JSON."
 

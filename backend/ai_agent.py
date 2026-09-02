@@ -13,7 +13,7 @@ import requests
 import re
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from prompt_engine import ShariahAdvisorPromptManager
+from prompt_engine import TradingAdvisorPromptManager
 from agents.orchestrator import SwarmOrchestrator as SwarmSimulationEngine
 from services.asset_resolver import resolve_asset_from_query
 from thetanuts_trader import ThetanutsTrader
@@ -75,9 +75,7 @@ def get_sentiment_data(ticker: str) -> dict:
         return None
 
 
-from services.asset_resolver import resolve_asset_from_query
-
-# (continued imports above)
+from advisor.trade_bridge import build_trade_proposal
 
 class AIAgent:
     def __init__(self):
@@ -115,7 +113,7 @@ class AIAgent:
             print("🚨 AMARAN: Tiada kunci API dijumpai dalam .env!")
 
         self._consensus_history: dict = {}
-        self.prompt_engine  = ShariahAdvisorPromptManager()
+        self.prompt_engine  = TradingAdvisorPromptManager()
         self.swarm_engine   = SwarmSimulationEngine()
 
     def process(
@@ -140,6 +138,7 @@ class AIAgent:
         if resolved_asset:
             sym = resolved_asset["symbol"]
             canonical_name = resolved_asset["canonical_name"]
+            spot_price = resolved_asset.get("price")  # may be None for some assets
             print(f"🎯 [AIAgent] Asset resolved: '{user_input}' -> {canonical_name} ({sym}). Triggering 5-Agent Intelligence...")
 
             try:
@@ -165,12 +164,36 @@ class AIAgent:
 
                 summary_md += "_Explore the full multi-agent breakdown, bull/bear cases, chart, and invalidation triggers in the research card below._"
 
+                # ── Build trade proposal if decision is actionable ──────────────
+                trade_result = build_trade_proposal(
+                    symbol=sym,
+                    decision=decision,
+                    investment_analysis=investment_analysis,
+                    preferences=preferences or {},
+                    portfolio=portfolio or {},
+                    trader=trader,
+                    spot_price=spot_price,
+                )
+
+                # Append trade status to the summary shown in the chat bubble
+                if trade_result["status"] == "EXECUTABLE":
+                    prop = trade_result["proposal"]
+                    summary_md += (
+                        f"\n\n---\n🔗 **Live Thetanuts Contract Found** · "
+                        f"{prop['option_type']} Strike: `{prop['strike']}` · "
+                        f"Collateral: `{prop['collateral_usdc']} USDC`"
+                    )
+                elif decision in ("BUY", "SELL"):
+                    summary_md += f"\n\n---\n⚠️ **Trade Note:** {trade_result['reason']}"
+
                 return {
                     "status":              "SUCCESS",
                     "response_type":       "investment_intelligence",
                     "final_advice":        summary_md,
                     "investment_analysis": investment_analysis,
-                    "trade_proposal":      None,
+                    "trade_proposal":      trade_result.get("proposal"),
+                    "trade_status":        trade_result["status"],
+                    "trade_reason":        trade_result["reason"],
                 }
 
             except Exception as e:
@@ -185,11 +208,10 @@ class AIAgent:
             system_prompt,
             prompt_content,
             chat_history,
-            shariah_result="NOT_PERFORMED",
             trade_proposal=None,
         )
 
-    def build_final_response(self, system_prompt, prompt_content, chat_history, shariah_result, trade_proposal, investment_analysis=None):
+    def build_final_response(self, system_prompt, prompt_content, chat_history, trade_proposal, investment_analysis=None):
         messages = [{"role": "system", "content": system_prompt}]
 
         if chat_history:
@@ -247,7 +269,6 @@ class AIAgent:
                 return {
                     "status":              "SUCCESS",
                     "final_advice":        final_advice,
-                    "raw_data":            {"shariah_status": shariah_result},
                     "trade_proposal":      trade_proposal,
                     "investment_analysis": investment_analysis,
                 }

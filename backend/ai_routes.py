@@ -1,6 +1,7 @@
 # ai_routes.py
 from flask import Blueprint, request, jsonify, g
 from ai_agent import AIAgent, trader, _log_thetanuts_trade, FORCE_DRY_RUN
+from trading.validator import validate_confirmation
 from firebase_config import db
 from security import require_auth
 from datetime import datetime
@@ -251,9 +252,18 @@ def confirm_trade():
                 "error": "Insufficient tradable USDC to fill this order right now.",
             }), 409
 
-        # dry_run is forced by FORCE_DRY_RUN in ai_agent.py while the
-        # wallet is unfunded — flip that one switch when you're ready for
-        # live fills, nothing here needs to change.
+        # 5. Hard validator re-check against fresh live data
+        ok, validation_reason = validate_confirmation(
+            selector=selector,
+            wallet=wallet_balance,
+            collateral_usdc=collateral_usdc,
+            current_order=current_order,
+        )
+        if not ok:
+            return jsonify({
+                "success": False,
+                "error": f"Trade blocked by risk validator: {validation_reason}",
+            }), 409
         execution_result = trader.execute_fill(
             collateral_usdc=collateral_usdc,
             underlying=ticker,

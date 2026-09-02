@@ -18,66 +18,83 @@ from typing import Dict, Any, Tuple, Optional
 from agents.base_agent import BaseAgent
 
 
-COMMITTEE_SYSTEM_PROMPT = """You are the Chief Investment Committee Chair for an elite AI investment intelligence system.
-You are responsible for issuing the explainable final investment assessment.
+COMMITTEE_SYSTEM_PROMPT = """You are the Chief Investment Committee Chair for an AI investment intelligence system.
 
-You receive independent reports from:
-1. Technical Analyst (Time Horizon: SHORT_TERM)
-2. Fundamental Analyst (Time Horizon: MEDIUM_LONG_TERM)
-3. News Intelligence Analyst (Time Horizon: SHORT_MEDIUM_TERM)
-4. Risk / Devil's Advocate (Contradiction and downside risk challenge)
-5. Data Quality Summary (Verification of data completeness)
+You are responsible for issuing the final explainable investment assessment.
 
-Strict Behavioral Rules:
-1. Do NOT simply count votes (e.g. 3 bullish vs 1 bearish does NOT automatically equal BUY).
-2. Compare evidence quality and data quality.
-3. Reconcile differences in time horizon (e.g. a short-term technical pullback is NOT contradictory with multi-year fundamental strength).
-4. Evaluate the Risk Agent's counterpoints seriously. If valuation or risk objections are strong, HOLD is safer than BUY.
-5. If data quality is POOR or essential metrics are missing across multiple agents, set decision to "INSUFFICIENT_DATA" or "HOLD".
-6. ETF & Index Assets: When analyzing Index ETFs (e.g. SPY, QQQ, DIA) where Fundamental corporate metrics are NOT_APPLICABLE, base the deliberation on technical trend, macro environment, news sentiment, and systemic risk.
-7. Construct the strongest Bull Case and Bear Case from the evidence.
-8. Explain clearly WHY the decision was reached in a comprehensive "summary" string (2-3 complete sentences). NEVER leave "summary" empty.
-9. Confidence represents evidence conviction (strength and consistency of data), NOT a probability of future returns.
-10. Return ONLY valid JSON matching the exact schema below.
+You receive:
+1. Canonical Market Data
+2. Independent Quantitative Screen
+3. Technical Analyst
+4. Fundamental Analyst
+5. News Analyst
+6. Risk / Devil's Advocate
+
+IMPORTANT DECISION RULES:
+
+1. Do NOT simply count votes.
+2. Evaluate evidence quality and consistency.
+3. Treat the quantitative screen as an independent quantitative evidence layer.
+4. Do not ignore a strong quantitative score merely because optional news data is unavailable.
+5. Missing news is NOT bearish evidence.
+6. Missing optional fundamentals are NOT automatically bearish evidence.
+7. Missing evidence should reduce confidence when material, but should not automatically force HOLD.
+8. Never invent or recall financial metrics.
+9. Every numerical statement must match the supplied canonical data.
+10. Never substitute a different P/E, margin, growth rate, valuation multiple, or technical value.
+11. Never mention metrics absent from the dossier.
+12. Different time horizons are not contradictions.
+13. Risk objections must be considered, but must be evidence-based.
+14. A BUY can be issued when the available evidence is sufficiently strong and risks are manageable.
+15. HOLD should be used when evidence is genuinely balanced or material uncertainty remains.
+16. INSUFFICIENT_DATA should be reserved for cases where critical evidence is actually unavailable.
+17. SELL requires meaningful bearish evidence, not merely the absence of bullish evidence.
+18. Confidence measures strength and consistency of supplied evidence, NOT probability of future returns.
+19. Construct a genuine bull case and bear case from supplied evidence.
+20. Return ONLY valid JSON.
+
+For the quantitative screen:
+- It is NOT the final decision.
+- It is independent evidence.
+- Use its score and component scores when assessing overall evidence quality.
+- Do not blindly follow it.
+
+For news:
+- If news sentiment is UNAVAILABLE, explicitly treat it as unavailable evidence.
+- Do not convert UNAVAILABLE into NEGATIVE.
+
+For risk:
+- Treat valid risk concerns seriously.
+- Reject unsupported or hallucinated metrics.
 
 Required JSON Schema:
 {
-  "symbol": "SPY",
+  "symbol": "NVDA",
   "decision": "HOLD",
   "confidence": 0.78,
   "risk_level": "MEDIUM",
-  "summary": "While broad market technical momentum remains healthy above key moving averages, mixed news sentiment and macro rate sensitivities suggest entering with caution. We recommend a HOLD / Dollar-Cost-Averaging posture.",
-  "bull_case": [
-    "Sustained uptrend with price holding above 50-day and 200-day moving averages",
-    "Positive institutional liquidity support across mega-cap constituents"
-  ],
-  "bear_case": [
-    "Overbought momentum oscillators hinting at potential short-term pullback",
-    "Macro geopolitical and interest rate uncertainties creating volatility"
-  ],
-  "key_reasons": [
-    "Technical trend remains structurally positive above support",
-    "Risk/reward is balanced at current levels favoring incremental allocation over aggressive buying"
-  ],
-  "major_risks": [
-    "Unexpected macroeconomic inflation prints impacting discount rates",
-    "Breakdown below major technical moving average support"
-  ],
-  "invalidation_conditions": [
-    "Daily close below 200-day moving average",
-    "Sharp deterioration in broader macroeconomic earnings breadth"
-  ],
+  "summary": "2-3 complete sentences explaining the evidence and decision.",
+  "bull_case": [],
+  "bear_case": [],
+  "key_reasons": [],
+  "major_risks": [],
+  "invalidation_conditions": [],
   "agent_consensus": {
     "technical": "BULLISH",
-    "fundamental": "NOT_APPLICABLE",
-    "news": "POSITIVE",
+    "fundamental": "STRONG",
+    "news": "UNAVAILABLE",
     "risk": "MEDIUM"
   }
 }
 
-Allowed Decisions: "BUY", "HOLD", "SELL", "INSUFFICIENT_DATA"
-Allowed Risk Levels: "LOW", "MEDIUM", "HIGH", "EXTREME"
-confidence: Float between 0.0 and 1.0 (evidence strength)
+Allowed Decisions:
+"BUY", "HOLD", "SELL", "INSUFFICIENT_DATA"
+
+Allowed Risk Levels:
+"LOW", "MEDIUM", "HIGH", "EXTREME"
+
+confidence:
+Float between 0.0 and 1.0.
 """
 
 
@@ -153,6 +170,7 @@ class CommitteeAgent(BaseAgent):
         fundamental_report: Dict[str, Any],
         news_report: Dict[str, Any],
         risk_report: Dict[str, Any],
+        screening_result: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Deterministic, rule-based committee synthesis fallback when all LLM calls time out or fail.
@@ -167,22 +185,50 @@ class CommitteeAgent(BaseAgent):
         news_sentiment = news_report.get("overall_sentiment", "NEUTRAL").upper()
         risk_level = risk_report.get("risk_level", "MEDIUM").upper()
 
+        screening_result = screening_result or {}
+
+        screen_score = screening_result.get("score")
+        
+
         # Decision scoring
+        # =====================================================
+# Decision scoring
+#
+# Quantitative screen is independent evidence.
+# It supports the decision but does not dominate it.
+# =====================================================
+
         score = 0
+
+        # Technical evidence
         if tech_outlook == "BULLISH":
             score += 2
         elif tech_outlook == "BEARISH":
             score -= 2
 
-        if news_sentiment in ("POSITIVE", "BULLISH"):
+        # Fundamental evidence
+        if fund_rating == "STRONG":
+            score += 2
+        elif fund_rating in ("WEAK", "DISTRESSED"):
+            score -= 2
+
+        # News evidence
+        # UNAVAILABLE = no directional contribution
+        if news_sentiment == "POSITIVE":
             score += 1
-        elif news_sentiment in ("NEGATIVE", "BEARISH"):
+        elif news_sentiment == "NEGATIVE":
             score -= 1
 
-        if fund_rating in ("EXCELLENT", "STRONG", "GOOD"):
-            score += 2
-        elif fund_rating in ("POOR", "WEAK", "DISTRESSED"):
-            score -= 2
+        # Quantitative screening
+        if screen_score is not None:
+            if screen_score >= 75:
+                score += 2
+            elif screen_score >= 60:
+                score += 1
+            elif screen_score < 40:
+                score -= 2
+            elif screen_score < 50:
+                score -= 1
 
         if score >= 3 and risk_level != "HIGH":
             decision = "BUY"
@@ -271,6 +317,7 @@ class CommitteeAgent(BaseAgent):
         fundamental_report: Dict[str, Any],
         news_report: Dict[str, Any],
         risk_report: Dict[str, Any],
+        screening_result: Optional[Dict[str, Any]] = None,
         analysis_id: str = "local",
     ) -> Dict[str, Any]:
         """
@@ -278,38 +325,64 @@ class CommitteeAgent(BaseAgent):
         Falls back gracefully to deterministic rule synthesis if LLMs fail.
         """
         # Compact payload to prevent token bloat and rate limits
+        screening_result = screening_result or {}
+
         payload = {
-            "symbol":             market_snapshot.get("symbol"),
-            "company_name":       market_snapshot.get("company_name"),
-            "asset_type":         market_snapshot.get("asset_type"),
-            "currency":           market_snapshot.get("currency"),
-            "price":              market_snapshot.get("price", {}).get("current_price"),
-            "data_quality":       market_snapshot.get("data_quality", {}).get("overall", "MODERATE"),
+            "canonical_market_data": {
+                "symbol": market_snapshot.get("symbol"),
+                "company_name": market_snapshot.get("company_name"),
+                "asset_type": market_snapshot.get("asset_type"),
+                "currency": market_snapshot.get("currency"),
+                "price": market_snapshot.get("price", {}),
+                "technical_indicators": market_snapshot.get(
+                    "technical_indicators",
+                    {},
+                ),
+                "fundamentals": market_snapshot.get(
+                    "fundamentals",
+                    {},
+                ),
+            },
+
+            "quantitative_screen": {
+                "score": screening_result.get("score"),
+                "screening_signal": screening_result.get(
+                    "screening_signal"
+                ),
+                "component_scores": screening_result.get(
+                    "component_scores",
+                    {},
+                ),
+                "signals": screening_result.get(
+                    "signals",
+                    {},
+                ),
+            },
+
+            "data_quality": market_snapshot.get(
+                "data_quality",
+                {},
+            ),
+
             "reports": {
-                "technical": {
-                    "outlook": technical_report.get("outlook", "NEUTRAL"),
-                    "confidence": technical_report.get("confidence", 0.5),
-                    "signals": technical_report.get("signals", [])[:3],
-                },
-                "fundamental": {
-                    "rating": fundamental_report.get("business_quality", {}).get("rating", "NOT_APPLICABLE"),
-                    "financial_health": fundamental_report.get("financial_health", {}).get("rating", "NOT_APPLICABLE"),
-                    "valuation_verdict": fundamental_report.get("valuation", {}).get("valuation_verdict", "NOT_APPLICABLE"),
-                },
-                "news": {
-                    "overall_sentiment": news_report.get("overall_sentiment", "NEUTRAL"),
-                    "thesis_impact": news_report.get("thesis_impact", "NEUTRAL"),
-                    "key_catalysts": news_report.get("key_catalysts", [])[:3],
-                },
-                "risk": {
-                    "risk_level": risk_report.get("risk_level", "MEDIUM"),
-                    "major_risks": risk_report.get("major_risks", [])[:2],
-                    "contradictions": risk_report.get("contradictions", [])[:2],
-                },
+                "technical": technical_report,
+
+                "fundamental": fundamental_report,
+
+                "news": news_report,
+
+                "risk": risk_report,
             },
         }
 
-        user_content = f"INVESTMENT COMMITTEE DOSSIER:\n{json.dumps(payload, indent=2)}\n\nPlease deliberate, reconcile time horizons, evaluate evidence quality, and issue the final investment decision. Return valid JSON."
+        user_content = (
+            "INVESTMENT COMMITTEE DOSSIER:\n"
+            f"{json.dumps(payload, indent=2)}\n\n"
+            "Deliberate using only the supplied evidence. "
+            "Treat missing information as unknown rather than negative. "
+            "Do not invent financial metrics. "
+            "Return valid JSON."
+        )
 
         report = await self.execute_with_validation(
             session=session,
@@ -330,4 +403,5 @@ class CommitteeAgent(BaseAgent):
             fundamental_report=fundamental_report,
             news_report=news_report,
             risk_report=risk_report,
+            screening_result=screening_result,
         )

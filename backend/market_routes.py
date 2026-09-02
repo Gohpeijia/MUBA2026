@@ -2,7 +2,6 @@ import os
 import requests
 from flask import Blueprint, jsonify, request
 from security import require_auth
-from shariah_filter import check_shariah_compliance
 from finnhub_service import get_rich_market_quote, get_company_fundamentals, get_historical_candles
 
 market_bp = Blueprint('market', __name__)
@@ -17,7 +16,7 @@ def get_stock_details(ticker):
     try:
         ticker = ticker.upper()
 
-        is_halal     = check_shariah_compliance(ticker)
+        
         quote        = get_rich_market_quote(ticker)
 
         if quote is None:
@@ -61,9 +60,7 @@ def get_stock_details(ticker):
                 "fiftyTwoWeekLow":       fundamentals.get("fiftyTwoWeekLow"),
                 "lotSize":               fundamentals.get("lotSize"),
                 
-                # Shariah
-                "isHalal":               is_halal["isHalal"],
-                "complianceReason":      is_halal["reason"],
+                 
             }
         })
 
@@ -160,10 +157,6 @@ def get_dynamic_halal_stocks():
             if '.' in ticker:
                 continue
 
-            compliance = check_shariah_compliance(ticker)
-            if not compliance['isHalal']:
-                continue
-
             quote = get_rich_market_quote(ticker)
             if quote:
                 compliant_stocks.append({
@@ -175,8 +168,6 @@ def get_dynamic_halal_stocks():
                     "changeFromOpen":        quote["changeFromOpen"],
                     "changePercentFromOpen": quote["changePercentFromOpen"],
                     "marketStatus":          quote["marketStatus"],
-                    "isHalal":               True,
-                    "reason":                compliance['reason'],
                 })
 
         return jsonify({

@@ -13,22 +13,34 @@ from agents.base_agent import BaseAgent
 
 
 NEWS_SYSTEM_PROMPT = """You are the Financial News Intelligence Agent.
-Analyze the supplied recent news articles for the asset.
+
+Analyze ONLY the supplied recent news articles.
 
 Time Horizon: SHORT_MEDIUM_TERM
 
-For the relevant articles:
-- Determine sentiment (POSITIVE, NEGATIVE, NEUTRAL)
-- Determine financial relevance and impact (HIGH, MEDIUM, LOW)
-- Identify whether impact is SHORT_TERM or LONG_TERM
-- Detect conflicting narratives (e.g. strong earnings vs regulatory headwinds)
-- Assess impact on the core investment thesis
+IMPORTANT DATA RULES:
 
-Strict Behavioral Rules:
-1. Do NOT assume that positive news automatically means the stock will rise.
-2. Do NOT invent news or fabricate events not present in the supplied articles.
-3. If no articles are supplied, set overall_sentiment to "NEUTRAL" or "UNAVAILABLE" and state that no recent news flow was available.
-4. Return ONLY valid JSON matching the exact schema below.
+1. Use ONLY articles supplied in the dossier.
+2. Never invent news, events, companies, earnings, regulations, or catalysts.
+3. Do not use outside knowledge.
+4. If article_count is 0, set:
+   - overall_sentiment = "UNAVAILABLE"
+   - thesis_impact = "NEUTRAL"
+   - confidence = 0.0
+   - key_events = []
+5. Absence of news must NOT be interpreted as positive or negative evidence.
+6. Do not create hypothetical headlines.
+7. Every event must correspond to a supplied article.
+8. Separate reported facts from interpretation.
+9. Return ONLY valid JSON.
+
+Analyze:
+- Sentiment
+- Financial relevance
+- Impact
+- Time horizon
+- Conflicting narratives
+- Thesis impact
 
 Required JSON Schema:
 {
@@ -36,24 +48,24 @@ Required JSON Schema:
   "time_horizon": "SHORT_MEDIUM_TERM",
   "overall_sentiment": "POSITIVE",
   "confidence": 0.73,
-  "key_events": [
-    {
-      "headline": "Q3 Revenue beats consensus by 8%",
-      "sentiment": "POSITIVE",
-      "impact": "MEDIUM",
-      "horizon": "LONG_TERM",
-      "reason": "Core operating division expanded gross margin."
-    }
-  ],
-  "bullish_narrative": "Strong earnings momentum and international market expansion.",
-  "bearish_narrative": "Currency volatility and sector-wide margin pressure.",
+  "key_events": [],
+  "bullish_narrative": "",
+  "bearish_narrative": "",
   "thesis_impact": "MODERATELY_POSITIVE"
 }
 
-Allowed Values:
-- overall_sentiment: "POSITIVE", "NEGATIVE", "NEUTRAL", "UNAVAILABLE"
-- thesis_impact: "STRONGLY_POSITIVE", "MODERATELY_POSITIVE", "NEUTRAL", "MODERATELY_NEGATIVE", "STRONGLY_NEGATIVE"
-confidence: Float between 0.0 and 1.0 (evidence strength)
+Allowed overall_sentiment:
+"POSITIVE", "NEGATIVE", "NEUTRAL", "UNAVAILABLE"
+
+Allowed thesis_impact:
+"STRONGLY_POSITIVE",
+"MODERATELY_POSITIVE",
+"NEUTRAL",
+"MODERATELY_NEGATIVE",
+"STRONGLY_NEGATIVE"
+
+confidence:
+Float between 0.0 and 1.0.
 """
 
 
@@ -97,57 +109,93 @@ class NewsAgent(BaseAgent):
 
         return True, None
 
-    def generate_fallback_report(self, market_snapshot: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Deterministic news intelligence fallback parsing Finnhub headlines.
-        """
-        symbol = market_snapshot.get("symbol", "N/A")
-        news_items = market_snapshot.get("news", [])
-
+    def generate_fallback_report(
+        self,
+        market_snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+    
+        symbol = market_snapshot.get(
+            "symbol",
+            "N/A",
+        )
+    
+        news_items = market_snapshot.get(
+            "news",
+            [],
+        )
+    
         key_events = []
+    
         for item in news_items[:4]:
-            headline = item.get("headline", "")
-            summary = item.get("summary", "")
-            if headline:
-                key_events.append({
-                    "headline": headline[:120],
-                    "sentiment": "NEUTRAL",
-                    "impact": "MEDIUM",
-                    "horizon": "SHORT_TERM",
-                    "reason": summary[:150] if summary else "Recent market news reporting."
-                })
-
-        overall_sent = "NEUTRAL"
-        thesis_impact = "NEUTRAL"
-        if len(key_events) > 0:
-            bullish_narrative = f"Recent news headlines for {symbol} maintain ongoing market coverage."
-            bearish_narrative = f"Macro environment headlines reflect broad market risk and uncertainty."
-        else:
-            bullish_narrative = f"No immediate adverse headlines reported for {symbol}."
-            bearish_narrative = f"Limited specific news catalysts detected in the current cycle."
-
+        
+            headline = item.get(
+                "headline",
+                "",
+            )
+    
+            summary = item.get(
+                "summary",
+                "",
+            )
+    
+            if not headline:
+                continue
+            
+            key_events.append({
+                "headline": headline[:120],
+                "sentiment": "NEUTRAL",
+                "impact": "MEDIUM",
+                "horizon": "SHORT_TERM",
+                "reason": (
+                    summary[:150]
+                    if summary
+                    else "Recent supplied news article."
+                ),
+            })
+    
+        if not key_events:
+            return {
+                "agent": "news",
+                "status": "SUCCESS",
+                "time_horizon": "SHORT_MEDIUM_TERM",
+                "provider_used": (
+                    "News Stream Parser "
+                    "(Deterministic Fallback)"
+                ),
+                "overall_sentiment": "UNAVAILABLE",
+                "confidence": 0.0,
+                "thesis_impact": "NEUTRAL",
+                "key_events": [],
+                "bullish_narrative": "",
+                "bearish_narrative": "",
+            }
+    
         return {
             "agent": "news",
             "status": "SUCCESS",
             "time_horizon": "SHORT_MEDIUM_TERM",
-            "provider_used": "News Stream Parser (Deterministic Fallback)",
-            "overall_sentiment": overall_sent,
-            "confidence": 0.65,
-            "thesis_impact": thesis_impact,
-            "key_events": key_events if key_events else [
-                {
-                    "headline": f"Standard market trading activity for {symbol}",
-                    "sentiment": "NEUTRAL",
-                    "impact": "LOW",
-                    "horizon": "SHORT_TERM",
-                    "reason": "Routine market volume."
-                }
-            ],
-            "bullish_narrative": bullish_narrative,
-            "bearish_narrative": bearish_narrative,
+            "provider_used": (
+                "News Stream Parser "
+                "(Deterministic Fallback)"
+            ),
+            "overall_sentiment": "NEUTRAL",
+            "confidence": 0.30,
+            "thesis_impact": "NEUTRAL",
+            "key_events": key_events,
+            "bullish_narrative": (
+                f"Recent supplied news coverage exists for {symbol}, "
+                "but deterministic sentiment classification is neutral."
+            ),
+            "bearish_narrative": "",
         }
 
-    async def run(self, session: aiohttp.ClientSession, market_snapshot: Dict[str, Any], analysis_id: str = "local") -> Dict[str, Any]:
+    async def run(
+    self,
+    session: aiohttp.ClientSession,
+    market_snapshot: Dict[str, Any],
+    analysis_id: str = "local",
+    screening_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Runs News Intelligence Analysis on normalized market snapshot.
         Falls back to news stream parser if LLMs fail.
@@ -155,13 +203,23 @@ class NewsAgent(BaseAgent):
         news_items = market_snapshot.get("news", [])
         
         payload = {
-            "symbol":        market_snapshot.get("symbol"),
-            "company_name":  market_snapshot.get("company_name"),
+            "symbol": market_snapshot.get("symbol"),
+            "company_name": market_snapshot.get("company_name"),
             "article_count": len(news_items),
-            "articles":      news_items[:10],
-        }
+            "articles": news_items[:10],
+            "data_quality": market_snapshot.get(
+                "data_quality",
+                {},
+            ),
+        }       
 
-        user_content = f"NEWS STREAM SNAPSHOT:\n{json.dumps(payload, indent=2)}\n\nPlease evaluate recent news flow and thesis impact. Return valid JSON."
+        user_content = (
+    "CANONICAL NEWS DOSSIER:\n"
+    f"{json.dumps(payload, indent=2)}\n\n"
+    "Analyze only supplied articles. "
+    "If article_count is zero, report UNAVAILABLE. "
+    "Return valid JSON."
+)
 
         report = await self.execute_with_validation(
             session=session,

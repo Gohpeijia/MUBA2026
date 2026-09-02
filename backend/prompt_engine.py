@@ -140,9 +140,6 @@ Please analyze the request using the quantitative market data, risk context, and
         return prompt.strip()
 
 
-# Alias for backward compatibility with existing imports in ai_agent.py
-ShariahAdvisorPromptManager = TradingAdvisorPromptManager
-
 
 def bina_dan_format_prompt(
     input_pengguna: str,
