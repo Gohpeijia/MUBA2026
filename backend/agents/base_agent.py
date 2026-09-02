@@ -39,7 +39,19 @@ class BaseAgent:
 
         if groq_key:
             self.providers.append({
-                "name":    "Groq",
+                "name":    "Groq (gpt-oss-20b)",
+                "url":     "https://api.groq.com/openai/v1/chat/completions",
+                "headers": {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                "model":   "openai/gpt-oss-20b",
+            })
+            self.providers.append({
+                "name":    "Groq (qwen3.8-27b)",
+                "url":     "https://api.groq.com/openai/v1/chat/completions",
+                "headers": {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                "model":   "qwen/qwen3.8-27b",
+            })
+            self.providers.append({
+                "name":    "Groq (qwen3.6-27b)",
                 "url":     "https://api.groq.com/openai/v1/chat/completions",
                 "headers": {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                 "model":   "qwen/qwen3.6-27b",
@@ -47,7 +59,7 @@ class BaseAgent:
 
         if openrouter_key:
             self.providers.append({
-                "name":    "OpenRouter",
+                "name":    "OpenRouter (llama-3.1-8b)",
                 "url":     "https://openrouter.ai/api/v1/chat/completions",
                 "headers": {"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"},
                 "model":   "meta-llama/llama-3.1-8b-instruct",
@@ -55,7 +67,7 @@ class BaseAgent:
 
         if gemini_key:
             self.providers.append({
-                "name":    "Gemini",
+                "name":    "Gemini (2.5-flash)",
                 "url":     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                 "headers": {"Authorization": f"Bearer {gemini_key}", "Content-Type": "application/json"},
                 "model":   "gemini-2.5-flash",
@@ -74,10 +86,10 @@ class BaseAgent:
         analysis_id: str = "local",
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
-        Tries providers in sequence (Groq -> OpenRouter -> Gemini).
+        Tries providers in sequence (Groq models -> OpenRouter -> Gemini).
         Returns (raw_text, provider_name, model_name) or (None, None, None) on complete failure.
         """
-        timeout = aiohttp.ClientTimeout(total=25)
+        timeout = aiohttp.ClientTimeout(total=14)
         last_error = None
 
         for provider in self.providers:
@@ -138,6 +150,38 @@ class BaseAgent:
 
         return cleaned.strip()
 
+    @staticmethod
+    def _safe_json_loads(text: str) -> Dict[str, Any]:
+        """
+        Parses JSON with multiple repair heuristics for common LLM syntax flaws.
+        """
+        if not text:
+            raise ValueError("Empty response text")
+
+        # 1. Standard json.loads
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        # 2. Heuristic: Remove trailing commas before closing braces/brackets
+        cleaned = re.sub(r",\s*([\]}])", r"\1", text)
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+        # 3. Heuristic: Replace raw newlines/tabs inside string literals
+        cleaned = re.sub(r'(?<!\\)\n', ' ', cleaned)
+        cleaned = re.sub(r'(?<!\\)\t', ' ', cleaned)
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+        # 4. Standard fallback to raise informative error
+        return json.loads(text)
+
     # ── Schema Validation & Correction Retry ──────────────────────────────────
 
     async def execute_with_validation(
@@ -159,7 +203,7 @@ class BaseAgent:
 
         # Attempt 1: Parse and validate
         try:
-            parsed = json.loads(raw_text)
+            parsed = self._safe_json_loads(raw_text)
             is_valid, err_msg = validator_func(parsed)
             if is_valid:
                 parsed["status"] = "SUCCESS"
@@ -180,7 +224,7 @@ class BaseAgent:
 
         if corr_text:
             try:
-                parsed = json.loads(corr_text)
+                parsed = self._safe_json_loads(corr_text)
                 is_valid, err_msg = validator_func(parsed)
                 if is_valid:
                     parsed["status"] = "SUCCESS"

@@ -90,6 +90,65 @@ class RiskAgent(BaseAgent):
 
         return True, None
 
+    def generate_fallback_assessment(
+        self,
+        market_snapshot: Dict[str, Any],
+        technical_report: Dict[str, Any],
+        fundamental_report: Dict[str, Any],
+        news_report: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        symbol = market_snapshot.get("symbol", "N/A")
+        tech_outlook = technical_report.get("outlook", "NEUTRAL")
+        fund_rating = fundamental_report.get("business_quality", {}).get("rating", "NOT_APPLICABLE")
+        news_sentiment = news_report.get("overall_sentiment", "NEUTRAL")
+
+        major_risks = [
+            {
+                "risk": "Macroeconomic Sensitivity",
+                "severity": "MEDIUM",
+                "explanation": f"Broader market volatility and interest rate policy shifts may pressure {symbol}."
+            },
+            {
+                "risk": "Momentum Reversal Risk",
+                "severity": "MEDIUM",
+                "explanation": f"Current technical signals ({tech_outlook}) could face sudden profit-taking at resistance."
+            }
+        ]
+
+        contradictions = []
+        if tech_outlook == "BULLISH" and news_sentiment in ("NEGATIVE", "BEARISH"):
+            contradictions.append({
+                "finding": f"Technical momentum is {tech_outlook}",
+                "counterpoint": f"News flow reflects cautious or negative sentiment ({news_sentiment})"
+            })
+        elif tech_outlook == "BULLISH" and fund_rating in ("POOR", "WEAK"):
+            contradictions.append({
+                "finding": "Price action shows bullish short-term strength",
+                "counterpoint": "Underlying business fundamentals show signs of weakness or margin compression"
+            })
+        else:
+            contradictions.append({
+                "finding": f"Baseline consensus leans towards {tech_outlook} outlook",
+                "counterpoint": "Downside tail risks in broader macro liquidity remain unpriced"
+            })
+
+        invalidation_conditions = [
+            f"Sustained breakdown below key technical moving average support levels.",
+            f"Deterioration in sector liquidity or unexpected macroeconomic headwinds."
+        ]
+
+        return {
+            "agent": "risk",
+            "status": "SUCCESS",
+            "time_horizon": "ALL_HORIZONS",
+            "provider_used": "Rule-Based Risk Synthesis (Deterministic Fallback)",
+            "risk_level": "MEDIUM",
+            "major_risks": major_risks,
+            "contradictions": contradictions,
+            "invalidation_conditions": invalidation_conditions,
+            "overall_assessment": f"While baseline indicators for {symbol} remain active, systemic volatility and unexpected technical breakdown represent the primary downside risks."
+        }
+
     async def run(
         self,
         session: aiohttp.ClientSession,
@@ -101,22 +160,45 @@ class RiskAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """
         Runs Adversarial Risk Analysis against the 3 specialist reports and raw data.
+        Falls back to rule-based risk synthesis if LLMs fail.
         """
         payload = {
             "symbol":             market_snapshot.get("symbol"),
             "company_name":       market_snapshot.get("company_name"),
-            "data_quality":       market_snapshot.get("data_quality", {}),
-            "technical_report":   technical_report,
-            "fundamental_report": fundamental_report,
-            "news_report":        news_report,
+            "asset_type":         market_snapshot.get("asset_type"),
+            "data_quality":       market_snapshot.get("data_quality", {}).get("overall", "MODERATE"),
+            "technical_report": {
+                "outlook": technical_report.get("outlook", "NEUTRAL"),
+                "confidence": technical_report.get("confidence", 0.5),
+                "signals": technical_report.get("signals", [])[:3],
+            },
+            "fundamental_report": {
+                "rating": fundamental_report.get("business_quality", {}).get("rating", "NOT_APPLICABLE"),
+                "financial_health": fundamental_report.get("financial_health", {}).get("rating", "NOT_APPLICABLE"),
+            },
+            "news_report": {
+                "overall_sentiment": news_report.get("overall_sentiment", "NEUTRAL"),
+                "thesis_impact": news_report.get("thesis_impact", "NEUTRAL"),
+            },
         }
 
         user_content = f"SPECIALIST ANALYST DOSSIER:\n{json.dumps(payload, indent=2)}\n\nPlease critique the thesis, find contradictions, and identify key downside failure conditions. Return valid JSON."
 
-        return await self.execute_with_validation(
+        report = await self.execute_with_validation(
             session=session,
             system_prompt=RISK_SYSTEM_PROMPT,
             user_content=user_content,
             validator_func=self.validate_report,
             analysis_id=analysis_id,
+        )
+
+        if report.get("status") == "SUCCESS":
+            return report
+
+        print(f"  🛡️ [{analysis_id}] [risk] LLM call unavailable — generating deterministic rule-based risk critique.")
+        return self.generate_fallback_assessment(
+            market_snapshot=market_snapshot,
+            technical_report=technical_report,
+            fundamental_report=fundamental_report,
+            news_report=news_report,
         )

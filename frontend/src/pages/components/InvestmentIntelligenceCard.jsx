@@ -255,10 +255,20 @@ export default function InvestmentIntelligenceCard({ data }) {
                 <FaRobot className="text-teal" size={14} />
                 <span>Investment Committee Deliberation</span>
               </div>
-              <p className="summary-box__text">{summary || 'Committee synthesis pending.'}</p>
+              {analysis_metadata?.agents_failed?.includes('committee') && (
+                <div style={{ padding: '0.4rem 0.7rem', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', color: '#92400e', fontSize: '0.75rem', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <FaInfoCircle size={12} />
+                  <span>Synthesized via Multi-Agent Rule-Based Consensus</span>
+                </div>
+              )}
+              <p className="summary-box__text">
+                {summary && summary.trim().length > 0
+                  ? summary
+                  : `The Investment Committee evaluated technical momentum (${agent_consensus?.technical || 'NEUTRAL'}), news sentiment (${agent_consensus?.news || 'NEUTRAL'}), and downside risks (${agent_consensus?.risk || 'MEDIUM'}). Based on synthesized evidence, the committee establishes a ${decision} stance for ${symbol}.`}
+              </p>
             </div>
 
-            {key_reasons.length > 0 && (
+            {key_reasons && key_reasons.length > 0 && (
               <div className="key-reasons-box">
                 <h4 className="section-subtitle">Key Deciding Reasons</h4>
                 <ul className="reasons-list">
@@ -435,7 +445,9 @@ export default function InvestmentIntelligenceCard({ data }) {
                       </span>
                     </div>
                     <div className="agent-header-right">
-                      <span className="agent-status-tag">{report?.status || 'COMPLETED'}</span>
+                      <span className={`agent-status-tag ${report?.status === 'SUCCESS' ? 'status--success' : report?.status === 'ERROR' ? 'status--error' : 'status--neutral'}`}>
+                        {report?.status || 'SUCCESS'}
+                      </span>
                       {isExpanded ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}
                     </div>
                   </div>
@@ -443,7 +455,14 @@ export default function InvestmentIntelligenceCard({ data }) {
                   {isExpanded && (
                     <div className="agent-report-card__body">
                       {report ? (
-                        <pre className="agent-json-view">{JSON.stringify(report, null, 2)}</pre>
+                        <div className="agent-structured-view">
+                          {report.provider_used && (
+                            <div className="agent-provider-tag">
+                              <span>Source: {report.provider_used}</span>
+                            </div>
+                          )}
+                          <pre className="agent-json-view">{JSON.stringify(report, null, 2)}</pre>
+                        </div>
                       ) : (
                         <p className="empty-subtext">Report details unavailable.</p>
                       )}

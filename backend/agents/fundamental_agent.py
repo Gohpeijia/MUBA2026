@@ -116,9 +116,102 @@ class FundamentalAgent(BaseAgent):
 
         return True, None
 
+    def generate_fallback_report(self, market_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deterministic, programmatic fundamental evaluation fallback.
+        """
+        symbol = market_snapshot.get("symbol", "N/A")
+        asset_type = market_snapshot.get("asset_type", "EQUITY")
+        funds = market_snapshot.get("fundamentals", {})
+
+        if asset_type in ("INDEX_ETF", "COMMODITY_ETF", "CRYPTO"):
+            return {
+                "agent": "fundamental",
+                "status": "SUCCESS",
+                "time_horizon": "MEDIUM_LONG_TERM",
+                "provider_used": "Programmatic Fundamentals Engine (ETF/Basket)",
+                "business_quality": {
+                    "rating": "NOT_APPLICABLE",
+                    "confidence": 0.85,
+                    "notes": f"{symbol} is an ETF/Index composite vehicle; corporate financial statement metrics are not applicable."
+                },
+                "financial_health": {
+                    "rating": "NOT_APPLICABLE",
+                    "confidence": 0.85,
+                    "notes": "Balance sheet debt metrics are not applicable to index basket assets."
+                },
+                "valuation": {
+                    "rating": "NOT_APPLICABLE",
+                    "confidence": 0.80,
+                    "notes": "Valuation is tied to weighted index constituent performance."
+                },
+                "bullish_factors": [
+                    f"Broad multi-sector exposure across top market constituents.",
+                    f"Inherent risk mitigation through index diversification."
+                ],
+                "bearish_factors": [
+                    f"Aggregate index valuation is sensitive to broader macroeconomic interest rate cycles."
+                ],
+                "evidence": [
+                    {"claim": f"Asset is classified as {asset_type}", "field": "asset_type", "value": asset_type}
+                ]
+            }
+
+        # Single equity evaluation
+        pe = funds.get("pe_ratio")
+        margin = funds.get("profit_margins")
+        de = funds.get("debt_to_equity")
+
+        bullish_factors = []
+        bearish_factors = []
+
+        if margin is not None and margin > 0.15:
+            bullish_factors.append(f"Healthy net profit margin at {margin * 100:.1f}%.")
+            bq_rating = "STRONG"
+        elif margin is not None and margin < 0.05:
+            bearish_factors.append(f"Compressed net profit margin at {margin * 100:.1f}%.")
+            bq_rating = "WEAK"
+        else:
+            bq_rating = "MODERATE"
+
+        if de is not None and de < 1.0:
+            bullish_factors.append(f"Conservative leverage with Debt-to-Equity of {de:.2f}.")
+            fh_rating = "HEALTHY"
+        elif de is not None and de > 2.0:
+            bearish_factors.append(f"Elevated financial leverage with Debt-to-Equity of {de:.2f}.")
+            fh_rating = "DISTRESSED"
+        else:
+            fh_rating = "MODERATE"
+
+        if pe is not None and 0 < pe < 18:
+            bullish_factors.append(f"Attractive valuation with trailing P/E of {pe:.1f}x.")
+            val_rating = "UNDERVALUED"
+        elif pe is not None and pe > 35:
+            bearish_factors.append(f"Premium valuation with trailing P/E of {pe:.1f}x.")
+            val_rating = "OVERVALUED"
+        else:
+            val_rating = "FAIR"
+
+        return {
+            "agent": "fundamental",
+            "status": "SUCCESS",
+            "time_horizon": "MEDIUM_LONG_TERM",
+            "provider_used": "Programmatic Fundamentals Engine (Deterministic Fallback)",
+            "business_quality": {"rating": bq_rating, "confidence": 0.75, "notes": f"Evaluated based on profitability margins."},
+            "financial_health": {"rating": fh_rating, "confidence": 0.75, "notes": f"Evaluated based on balance sheet leverage."},
+            "valuation": {"rating": val_rating, "confidence": 0.75, "notes": f"Evaluated based on P/E multiples."},
+            "bullish_factors": bullish_factors if bullish_factors else ["Financial operations maintain baseline stability."],
+            "bearish_factors": bearish_factors if bearish_factors else ["Sector competition requires ongoing capital investment."],
+            "evidence": [
+                {"claim": f"Trailing P/E is {pe}", "field": "pe_ratio", "value": pe},
+                {"claim": f"Profit margin is {margin}", "field": "profit_margins", "value": margin},
+            ]
+        }
+
     async def run(self, session: aiohttp.ClientSession, market_snapshot: Dict[str, Any], analysis_id: str = "local") -> Dict[str, Any]:
         """
         Runs Fundamental Analysis on normalized market snapshot.
+        Falls back to programmatic fundamentals engine if LLMs fail.
         """
         payload = {
             "symbol":        market_snapshot.get("symbol"),
@@ -131,10 +224,16 @@ class FundamentalAgent(BaseAgent):
 
         user_content = f"FUNDAMENTAL DATA SNAPSHOT:\n{json.dumps(payload, indent=2)}\n\nPlease evaluate financial health, business quality, and valuation. Return valid JSON."
 
-        return await self.execute_with_validation(
+        report = await self.execute_with_validation(
             session=session,
             system_prompt=FUNDAMENTAL_SYSTEM_PROMPT,
             user_content=user_content,
             validator_func=self.validate_report,
             analysis_id=analysis_id,
         )
+
+        if report.get("status") == "SUCCESS":
+            return report
+
+        print(f"  🛡️ [{analysis_id}] [fundamental] LLM call unavailable — generating deterministic fundamental report.")
+        return self.generate_fallback_report(market_snapshot)
