@@ -1,17 +1,21 @@
 """API routes for automated investment opportunities and trade preparation.
 
-Discovery is strictly separated from trade execution.
+Discovery is strictly separated from trade execution, AND (new) BUY
+discovery is strictly separated from SELL discovery:
+
+    opportunity_engine.py  → BUY  → scans the whole market
+    sell_scanner.py        → SELL → scans only what users actually hold
 
 Flow:
-    scanner
-        ↓
-    backend cached analysis
+    BUY scanner (market-wide) ─┐
+                                ├─→ backend cached analysis
+    SELL scanner (holdings) ───┘
         ↓
     authenticated user
         ↓
     /prepare
         ↓
-    user's preferences + portfolio
+    user's preferences + portfolio  (+ ownership check for SELL)
         ↓
     advisor.trade_bridge.build_trade_proposal()
         ↓
@@ -29,8 +33,12 @@ from flask import Blueprint, jsonify, request, g
 
 from investment.opportunity_engine import (
     execute_scan_pipeline,
-    get_latest_opportunities,
+    get_latest_buy_opportunities,
     get_cached_entry,
+)
+from investment.sell_scanner import (
+    execute_sell_scan_pipeline,
+    get_latest_sell_opportunities,
 )
 
 from advisor.trade_bridge import build_trade_proposal
@@ -112,6 +120,32 @@ def _get_user_portfolio(user_id: str) -> dict:
         }
 
 
+def _user_holds_symbol(portfolio: dict, symbol: str) -> bool:
+    """True if the user's portfolio shows a positive-quantity position in
+    `symbol`. Used as a defense-in-depth guard before preparing a SELL —
+    the SELL scanner already only notifies holders, but /prepare shouldn't
+    trust the client-supplied analysis_id alone to imply ownership."""
+    positions = portfolio.get("positions", {})
+    if not isinstance(positions, dict):
+        return False
+
+    position = positions.get(symbol)
+    if position is None:
+        return False
+
+    if isinstance(position, dict):
+        qty = position.get("quantity", position.get("qty"))
+    elif isinstance(position, (int, float)):
+        qty = position
+    else:
+        qty = None
+
+    try:
+        return qty is not None and float(qty) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  GET /api/opportunities
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,15 +153,35 @@ def _get_user_portfolio(user_id: str) -> dict:
 @opportunities_bp.route("", methods=["GET"])
 def get_opportunities():
     """
-    Return the latest globally discovered opportunities.
+    Return the latest globally discovered BUY opportunities merged with
+    the latest portfolio-aware SELL opportunities.
 
-    Discovery itself is not user-specific.
-    User-specific risk/portfolio information is applied later by /prepare.
+    BUY discovery is not user-specific. SELL opportunities ARE tied to
+    specific holders (see "holder_user_ids" on each SELL entry) but this
+    endpoint still returns them all — per-user filtering/scoping for what
+    a given user should actually see happens client-side or in /prepare,
+    same as before.
     """
     try:
-        opportunities = get_latest_opportunities()
+        buy = get_latest_buy_opportunities()
+        sell = get_latest_sell_opportunities()
 
-        return jsonify(opportunities), 200
+        merged = {
+            "generated_at": max(
+                filter(None, [buy.get("generated_at"), sell.get("generated_at")]),
+                default=None,
+            ),
+            "status": buy.get("status", "AWAITING_SCAN"),
+            "opportunities": (
+                buy.get("opportunities", []) + sell.get("opportunities", [])
+            ),
+            "metadata": {
+                "buy": buy.get("metadata", {}),
+                "sell": sell.get("metadata", {}),
+            },
+        }
+
+        return jsonify(merged), 200
 
     except Exception:
         logger.exception("Failed to retrieve opportunities")
@@ -145,49 +199,54 @@ def get_opportunities():
 @opportunities_bp.route("/scan", methods=["POST"])
 def trigger_scan():
     """
-    Start a manual discovery scan asynchronously.
+    Start a manual discovery scan asynchronously: BUY first, then SELL.
 
     This endpoint ONLY discovers opportunities.
     It never prepares or executes a trade.
 
-    The shared scan lock is owned by opportunity_engine.py,
-    so manual and scheduled scans cannot overlap.
+    BUY and SELL share opportunity_engine's scan lock, so running them
+    sequentially in one background thread (rather than two separate
+    threads) avoids either one skipping because the other is running.
     """
 
     def run_scan_async():
         try:
-            logger.info("Starting manual opportunity scan...")
+            logger.info("Starting manual opportunity scan (BUY)...")
 
-            result = execute_scan_pipeline()
+            buy_result = execute_scan_pipeline()
 
-            if not isinstance(result, dict):
-                logger.info(
-                    "Manual opportunity scan completed."
-                )
-                return
-
-            if result.get("status") == "SCAN_ALREADY_IN_PROGRESS":
-                logger.info(
-                    "Manual opportunity scan skipped: "
-                    "another scan is already running."
-                )
-                return
-
-            opportunities = result.get(
-                "opportunities",
-                [],
-            )
-
-            logger.info(
-                "Manual opportunity scan completed: "
-                "%d opportunities found.",
-                len(opportunities),
-            )
+            if isinstance(buy_result, dict):
+                if buy_result.get("status") == "SCAN_ALREADY_IN_PROGRESS":
+                    logger.info(
+                        "Manual BUY scan skipped: another scan is already running."
+                    )
+                else:
+                    logger.info(
+                        "Manual BUY scan completed: %d opportunities found.",
+                        len(buy_result.get("opportunities", [])),
+                    )
 
         except Exception:
-            logger.exception(
-                "Opportunity scan failed."
-            )
+            logger.exception("BUY opportunity scan failed.")
+
+        try:
+            logger.info("Starting manual opportunity scan (SELL)...")
+
+            sell_result = execute_sell_scan_pipeline()
+
+            if isinstance(sell_result, dict):
+                if sell_result.get("status") == "SCAN_ALREADY_IN_PROGRESS":
+                    logger.info(
+                        "Manual SELL scan skipped: another scan is already running."
+                    )
+                else:
+                    logger.info(
+                        "Manual SELL scan completed: %d opportunities found.",
+                        len(sell_result.get("opportunities", [])),
+                    )
+
+        except Exception:
+            logger.exception("SELL opportunity scan failed.")
 
     thread = threading.Thread(
         target=run_scan_async,
@@ -214,10 +273,14 @@ def prepare_trade(analysis_id):
 
     IMPORTANT:
     - The frontend only supplies analysis_id.
-    - The full investment analysis comes from the trusted backend cache.
+    - The full investment analysis comes from the trusted backend cache
+      (populated by EITHER the BUY scanner or the SELL scanner).
     - User preferences come from Firebase.
     - User portfolio comes from Firebase.
     - This function NEVER executes a trade.
+    - For SELL entries, the requesting user must actually hold the symbol —
+      the SELL scanner only notifies holders, but this route re-checks
+      rather than trusting that implicitly.
     """
 
     # ── 1. Retrieve trusted backend analysis ────────────────────────────────
@@ -235,6 +298,7 @@ def prepare_trade(analysis_id):
         symbol = entry["symbol"]
         decision = entry["decision"]
         spot_price = entry.get("spot_price")
+        kind = entry.get("kind", "BUY")
 
     except (KeyError, TypeError):
         logger.exception(
@@ -273,12 +337,35 @@ def prepare_trade(analysis_id):
     preferences = _get_user_preferences(user_id)
     portfolio = _get_user_portfolio(user_id)
 
+    # ── 3b. SELL-specific ownership guard ───────────────────────────────────
+    #
+    # A SELL entry is only useful to a user who actually holds the symbol.
+    # The SELL scanner already scopes notifications to holders, but this
+    # route doesn't take that on faith — it re-checks against the user's
+    # own live portfolio before ever building a proposal.
+
+    if kind == "SELL" and not _user_holds_symbol(portfolio, symbol):
+        logger.info(
+            "Blocked SELL prepare for %s: user %s does not hold %s",
+            analysis_id,
+            user_id,
+            symbol,
+        )
+
+        return jsonify({
+            "status": "RECOMMEND_ONLY",
+            "reason": f"You don't currently hold {symbol} — nothing to sell.",
+            "proposal": None,
+            "analysis_id": analysis_id,
+        }), 200
+
     logger.info(
-        "Preparing opportunity %s for user %s | symbol=%s | decision=%s",
+        "Preparing opportunity %s for user %s | symbol=%s | decision=%s | kind=%s",
         analysis_id,
         user_id,
         symbol,
         decision,
+        kind,
     )
 
     # ── 4. Build trade proposal ────────────────────────────────────────────

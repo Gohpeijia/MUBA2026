@@ -1,5 +1,10 @@
+"""Background scheduler for automated investment opportunity scanning.
 
-"""Background scheduler for automated investment opportunity scanning."""
+Each tick runs the market-wide BUY scanner, then the portfolio-aware SELL
+scanner, sequentially. They share a lock (opportunity_engine._SCAN_LOCK) so
+running them back-to-back in one job — rather than as two competing jobs —
+avoids one silently skipping because the other grabbed the lock first.
+"""
 
 import os
 import logging
@@ -7,6 +12,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from investment.opportunity_engine import execute_scan_pipeline
+from investment.sell_scanner import execute_sell_scan_pipeline
 
 
 logger = logging.getLogger(__name__)
@@ -18,24 +24,48 @@ OPPORTUNITY_SCAN_INTERVAL_MINUTES = int(
 _scheduler = None
 
 
-def _run_scheduled_scan():
-    """Run one scheduled opportunity scan safely."""
+def _run_scheduled_buy_scan():
     try:
-        logger.info("Starting scheduled opportunity scan...")
+        logger.info("Starting scheduled opportunity scan (BUY)...")
 
         result = execute_scan_pipeline()
 
         if isinstance(result, dict):
             opportunities = result.get("opportunities", [])
             logger.info(
-                "Scheduled opportunity scan completed: %d opportunities found.",
+                "Scheduled BUY scan completed: %d opportunities found.",
                 len(opportunities),
             )
         else:
-            logger.info("Scheduled opportunity scan completed.")
+            logger.info("Scheduled BUY scan completed.")
 
     except Exception:
-        logger.exception("Scheduled opportunity scan failed.")
+        logger.exception("Scheduled BUY scan failed.")
+
+
+def _run_scheduled_sell_scan():
+    try:
+        logger.info("Starting scheduled opportunity scan (SELL)...")
+
+        result = execute_sell_scan_pipeline()
+
+        if isinstance(result, dict):
+            opportunities = result.get("opportunities", [])
+            logger.info(
+                "Scheduled SELL scan completed: %d opportunities found.",
+                len(opportunities),
+            )
+        else:
+            logger.info("Scheduled SELL scan completed.")
+
+    except Exception:
+        logger.exception("Scheduled SELL scan failed.")
+
+
+def _run_scheduled_scan():
+    """Run one BUY scan followed by one SELL scan, safely."""
+    _run_scheduled_buy_scan()
+    _run_scheduled_sell_scan()
 
 
 def init_scheduler(app):
@@ -76,7 +106,7 @@ def init_scheduler(app):
     _scheduler.start()
 
     logger.info(
-        "Opportunity scanner scheduled every %d minutes.",
+        "Opportunity scanner (BUY + SELL) scheduled every %d minutes.",
         OPPORTUNITY_SCAN_INTERVAL_MINUTES,
     )
 
@@ -97,4 +127,3 @@ def shutdown_scheduler():
         logger.exception("Failed to shut down opportunity scheduler.")
     finally:
         _scheduler = None
-

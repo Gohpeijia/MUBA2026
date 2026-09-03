@@ -24,22 +24,87 @@ _NOTIFICATION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 def _handle_notification_result(future):
     try:
         successful_ids = future.result()
-        if successful_ids:
-            db = firestore.client()
-            for analysis_id in successful_ids:
-                doc_ref = db.collection("opportunity_notifications").document(analysis_id)
-                doc_ref.update({
-                    "status": "NOTIFIED",
-                    "notified_at": datetime.now(timezone.utc).isoformat()
-                })
-                logger.info(f"Successfully marked opportunity {analysis_id} as NOTIFIED.")
-    except Exception as e:
-        logger.error(f"Notification task failed entirely: {e}")
 
-# Prevent overlapping manual/scheduled scans.
+        if not successful_ids:
+            return
+
+        db = firestore.client()
+
+        for analysis_id in successful_ids:
+            try:
+                doc_ref = (
+                    db.collection(
+                        "opportunity_notifications"
+                    )
+                    .document(analysis_id)
+                )
+
+                doc_ref.update(
+                    {
+                        "status": "NOTIFIED",
+                        "notified_at": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                    }
+                )
+
+                logger.info(
+                    "Successfully marked opportunity %s "
+                    "as NOTIFIED.",
+                    analysis_id,
+                )
+
+            except Exception:
+                logger.exception(
+                    "Failed to mark opportunity %s as NOTIFIED.",
+                    analysis_id,
+                )
+
+    except Exception:
+        logger.exception(
+            "Notification task failed entirely."
+        )
+
+
+def submit_notification_job(opportunities):
+    """
+    Public wrapper around the shared notification executor + callback.
+
+    Exists so sibling scanners (e.g. sell_scanner.py) can push notifications
+    through the exact same async path as the BUY scanner without reaching
+    into this module's private executor/callback.
+    """
+    future = _NOTIFICATION_EXECUTOR.submit(notify_users_of_opportunities, opportunities)
+    future.add_done_callback(_handle_notification_result)
+
+
+# Prevent overlapping scans. Shared by BUY and SELL — both hit the same
+# rate-limited data/AI providers, so they must never run concurrently.
 _SCAN_LOCK = threading.Lock()
 
+
+def acquire_scan_lock(blocking: bool = False) -> bool:
+    """Acquire the shared scan lock. Used by both this module's
+    execute_scan_pipeline() and sell_scanner.execute_sell_scan_pipeline()."""
+    return _SCAN_LOCK.acquire(blocking=blocking)
+
+
+def release_scan_lock() -> None:
+    _SCAN_LOCK.release()
+
+
+# Shared analysis cache. BUY and SELL entries both live here, tagged with
+# "kind": "BUY" / "kind": "SELL", so /prepare's get_cached_entry() works
+# identically regardless of which scanner produced the entry.
 _ANALYSIS_CACHE = {}
+
+
+def cache_analysis(analysis_id: str, entry: dict) -> None:
+    """Public setter so sell_scanner.py can populate the same cache that
+    /prepare reads from via get_cached_entry()."""
+    _ANALYSIS_CACHE[analysis_id] = entry
+
+
 _LATEST_OPPORTUNITIES = {
     "generated_at": None,
     "status": "AWAITING_SCAN",
@@ -47,12 +112,86 @@ _LATEST_OPPORTUNITIES = {
     "metadata": {},
 }
 
+def claim_new_opportunities(opportunities):
+    """
+    Atomically claims notification records for opportunities that have not
+    already been claimed.
+
+    Returns only opportunities that this process successfully claimed.
+
+    Both BUY and SELL scanners use this function.
+    """
+
+    if not opportunities:
+        return []
+
+    db = firestore.client()
+    new_opportunities = []
+
+    @firestore.transactional
+    def claim_opportunity(transaction, ref):
+        snapshot = ref.get(transaction=transaction)
+
+        if snapshot.exists:
+            return False
+
+        transaction.set(
+            ref,
+            {
+                "status": "PENDING",
+                "created_at": datetime.now(
+                    timezone.utc
+                ).isoformat(),
+                "notified_at": None,
+            },
+        )
+
+        return True
+
+    for opportunity in opportunities:
+        analysis_id = opportunity.get("analysis_id")
+
+        if not analysis_id:
+            logger.warning(
+                "Skipping opportunity without analysis_id: %s",
+                opportunity,
+            )
+            continue
+
+        doc_ref = (
+            db.collection("opportunity_notifications")
+            .document(analysis_id)
+        )
+
+        transaction = db.transaction()
+
+        try:
+            claimed = claim_opportunity(
+                transaction,
+                doc_ref,
+            )
+
+            if claimed:
+                new_opportunities.append(opportunity)
+
+        except Exception:
+            logger.exception(
+                "Failed to claim opportunity %s",
+                analysis_id,
+            )
+
+    return new_opportunities
 
 def _execute_scan_pipeline():
-    """Internal discovery implementation. Caller must hold _SCAN_LOCK."""
+    """Internal BUY discovery implementation. Caller must hold _SCAN_LOCK.
+
+    Scans the ENTIRE market universe for new entry opportunities. This
+    scanner is deliberately blind to any individual user's portfolio —
+    that's the SELL scanner's job (see investment/sell_scanner.py).
+    """
     global _LATEST_OPPORTUNITIES
 
-    logger.info("Starting automated opportunity scan...")
+    logger.info("Starting automated opportunity scan (BUY)...")
 
     universe = get_scan_universe()
     screened_results = []
@@ -87,16 +226,21 @@ def _execute_scan_pipeline():
                 analysis.get("confidence", 0.0)
             )
 
-            if decision in ("BUY", "SELL") and confidence >= CONFIDENCE_THRESHOLD:
+            # BUY scanner only ever surfaces BUY. A SELL decision here is
+            # meaningless (nothing was bought yet) and is intentionally
+            # dropped — SELL signals only come from sell_scanner.py, and
+            # only for symbols a user actually holds.
+            if decision == "BUY" and confidence >= CONFIDENCE_THRESHOLD:
 
-                analysis_id = (
-                    analysis.get("analysis_id")
-                    or str(uuid.uuid4())
-                )
+                analysis_id = analysis.get("analysis_id")
 
+                if not analysis_id:
+                    analysis_id = str(uuid.uuid4())
+                    analysis["analysis_id"] = analysis_id
+                
                 analysis["analysis_id"] = analysis_id
 
-                _ANALYSIS_CACHE[analysis_id] = {
+                cache_analysis(analysis_id, {
                     "analysis": analysis,
                     "symbol": symbol,
                     "decision": decision,
@@ -104,7 +248,8 @@ def _execute_scan_pipeline():
                     "spot_price": analysis.get("current_price"),
                     "created_at": datetime.now(timezone.utc),
                     "screen_score": candidate["score"],
-                }
+                    "kind": "BUY",
+                })
 
                 valid_opportunities.append({
                     "symbol": symbol,
@@ -116,6 +261,7 @@ def _execute_scan_pipeline():
                     ),
                     "screen_score": candidate["score"],
                     "analysis_id": analysis_id,
+                    "kind": "BUY",
                 })
 
         except Exception as e:
@@ -129,33 +275,9 @@ def _execute_scan_pipeline():
         reverse=True,
     )
 
-    # Deduplicate and claim new opportunities using Firestore transactions
-    db = firestore.client()
-    new_opportunities = []
-
-    @firestore.transactional
-    def claim_opportunity(transaction, ref):
-        snapshot = ref.get(transaction=transaction)
-        if snapshot.exists:
-            return False
-        transaction.set(ref, {
-            "status": "PENDING",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "notified_at": None
-        })
-        return True
-
-    for opp in valid_opportunities:
-        analysis_id = opp["analysis_id"]
-        doc_ref = db.collection("opportunity_notifications").document(analysis_id)
-        
-        transaction = db.transaction()
-        try:
-            claimed = claim_opportunity(transaction, doc_ref)
-            if claimed:
-                new_opportunities.append(opp)
-        except Exception as e:
-            logger.error(f"Failed to claim opportunity {analysis_id}: {e}")
+    new_opportunities = claim_new_opportunities(
+         valid_opportunities
+    )
 
     _LATEST_OPPORTUNITIES = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -171,24 +293,25 @@ def _execute_scan_pipeline():
     }
 
     logger.info(
-        f"Scan complete. {len(valid_opportunities)} opportunities found. {len(new_opportunities)} new."
+        f"BUY scan complete. {len(valid_opportunities)} opportunities found. {len(new_opportunities)} new."
     )
 
     if new_opportunities:
-        future = _NOTIFICATION_EXECUTOR.submit(notify_users_of_opportunities, new_opportunities)
-        future.add_done_callback(_handle_notification_result)
+        # BUY opportunities broadcast to every opted-in user — discovery is
+        # not user-specific, unlike SELL.
+        submit_notification_job(new_opportunities)
 
     return _LATEST_OPPORTUNITIES
 
 
 def execute_scan_pipeline():
     """
-    Public entry point for manual and scheduled scans.
+    Public entry point for manual and scheduled BUY scans.
 
-    Uses one shared process-local lock so a scheduled scan and a
-    manually triggered scan cannot run simultaneously.
+    Uses the shared process-local lock so a scheduled/manual BUY scan and
+    a SELL scan (or another BUY scan) can never run simultaneously.
     """
-    if not _SCAN_LOCK.acquire(blocking=False):
+    if not acquire_scan_lock(blocking=False):
         logger.warning(
             "Opportunity scan skipped: another scan is already running."
         )
@@ -203,9 +326,17 @@ def execute_scan_pipeline():
         return _execute_scan_pipeline()
 
     finally:
-        _SCAN_LOCK.release()
+        release_scan_lock()
 
 
+def get_latest_buy_opportunities():
+    return _LATEST_OPPORTUNITIES
+
+
+# Kept for backward compatibility with existing callers (e.g. market_routes
+# or older frontend code) that expect the BUY-only shape. New code should
+# prefer investment_opportunity_routes.get_opportunities(), which merges
+# BUY and SELL.
 def get_latest_opportunities():
     return _LATEST_OPPORTUNITIES
 
@@ -213,7 +344,9 @@ def get_latest_opportunities():
 def get_cached_entry(analysis_id: str):
     """Returns the full backend cache entry (analysis + symbol + decision +
     spot_price), or None if missing/expired. Internal use by the /prepare
-    route only — never exposed directly to the frontend."""
+    route only — never exposed directly to the frontend.
+
+    Shared by both BUY and SELL entries (see cache_analysis() above)."""
     entry = _ANALYSIS_CACHE.get(analysis_id)
 
     if not entry:

@@ -12,7 +12,6 @@ import React, { memo } from 'react';
  *  loading: bool
  */
 const FIELDS = [
-  { key: 'shariahStatus',   label: 'Status Syariah' },
   { key: 'sector',          label: 'Sektor' },
   { key: 'industry',        label: 'Industri' },
   { key: 'marketCap',       label: 'Modal Pasaran (Juta)' },

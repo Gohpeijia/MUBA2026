@@ -1,6 +1,73 @@
 <div align="center">
 
+                         app.py
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+       API Blueprints              APScheduler
+             │                           │
+             │                     every 30 min
+             │                           │
+             ▼                           ▼
+    /api/opportunities          execute_scan_pipeline()
+             │                           │
+             │                    ┌──────┴──────┐
+             │                    │             │
+             │               Screener       Ranker
+             │                    │             │
+             │                    └──────┬──────┘
+             │                           ▼
+             │                  TOP 5 candidates
+             │                           │
+             │                           ▼
+             │                 MultiAgentOrchestrator
+             │                           │
+             │                           ▼
+             │                  BUY / SELL / HOLD
+             │                           │
+             │                  confidence >= 0.55
+             │                           │
+             │                           ▼
+             │                    Opportunity Cache
+             │
+             ▼
+       React Frontend
+             │
+             │ user clicks "Act"
+             ▼
+ /<analysis_id>/prepare
+             │
+             ▼
+    Firebase preferences
+    Firebase portfolio
+             │
+             ▼
+   build_trade_proposal()
+             │
+             ▼
+       PROPOSAL ONLY
+             │
+             ▼
+     User confirmation
+             │
+             ▼
+ /api/aiagent/ai/confirm-trade
+             │
+             ▼
+     Fresh OptionBook
+             │
+             ▼
+        Validator
+             │
+             ▼
+    ThetanutsTrader
+             │
+             ▼
+         DRY RUN
 
+
+
+![alt text](image.png)
 
 [![React](https://img.shields.io/badge/React-19+-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
