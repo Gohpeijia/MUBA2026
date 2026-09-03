@@ -2,7 +2,11 @@ import os
 import uuid
 import logging
 import threading
+import concurrent.futures
 from datetime import datetime, timezone, timedelta
+
+from firebase_admin import firestore
+from services.notification_service import notify_users_of_opportunities
 
 from investment.asset_universe import get_scan_universe
 from investment.screener import screen_asset
@@ -14,6 +18,23 @@ logger = logging.getLogger(__name__)
 ANALYSIS_CACHE_TTL_MINUTES = int(os.getenv("ANALYSIS_CACHE_TTL_MINUTES", 30))
 TOP_N = int(os.getenv("TOP_N_OPPORTUNITIES", 5))
 CONFIDENCE_THRESHOLD = 0.55
+
+_NOTIFICATION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+def _handle_notification_result(future):
+    try:
+        successful_ids = future.result()
+        if successful_ids:
+            db = firestore.client()
+            for analysis_id in successful_ids:
+                doc_ref = db.collection("opportunity_notifications").document(analysis_id)
+                doc_ref.update({
+                    "status": "NOTIFIED",
+                    "notified_at": datetime.now(timezone.utc).isoformat()
+                })
+                logger.info(f"Successfully marked opportunity {analysis_id} as NOTIFIED.")
+    except Exception as e:
+        logger.error(f"Notification task failed entirely: {e}")
 
 # Prevent overlapping manual/scheduled scans.
 _SCAN_LOCK = threading.Lock()
@@ -108,6 +129,34 @@ def _execute_scan_pipeline():
         reverse=True,
     )
 
+    # Deduplicate and claim new opportunities using Firestore transactions
+    db = firestore.client()
+    new_opportunities = []
+
+    @firestore.transactional
+    def claim_opportunity(transaction, ref):
+        snapshot = ref.get(transaction=transaction)
+        if snapshot.exists:
+            return False
+        transaction.set(ref, {
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "notified_at": None
+        })
+        return True
+
+    for opp in valid_opportunities:
+        analysis_id = opp["analysis_id"]
+        doc_ref = db.collection("opportunity_notifications").document(analysis_id)
+        
+        transaction = db.transaction()
+        try:
+            claimed = claim_opportunity(transaction, doc_ref)
+            if claimed:
+                new_opportunities.append(opp)
+        except Exception as e:
+            logger.error(f"Failed to claim opportunity {analysis_id}: {e}")
+
     _LATEST_OPPORTUNITIES = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "SUCCESS",
@@ -122,8 +171,12 @@ def _execute_scan_pipeline():
     }
 
     logger.info(
-        f"Scan complete. {len(valid_opportunities)} opportunities found."
+        f"Scan complete. {len(valid_opportunities)} opportunities found. {len(new_opportunities)} new."
     )
+
+    if new_opportunities:
+        future = _NOTIFICATION_EXECUTOR.submit(notify_users_of_opportunities, new_opportunities)
+        future.add_done_callback(_handle_notification_result)
 
     return _LATEST_OPPORTUNITIES
 

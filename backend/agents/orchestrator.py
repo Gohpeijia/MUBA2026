@@ -306,11 +306,22 @@ class MultiAgentOrchestrator:
             0,
         )
 
+        decision_source = committee_report.get(
+            "decision_source",
+            "UNKNOWN",
+        )
+        
+        fallback_used = committee_report.get(
+            "fallback_used",
+            False,
+        )
+
         print(
             f"✅ [Orchestrator] [{analysis_id}] "
             f"Analysis finished in {duration_ms}ms | "
             f"Decision: {decision} @ "
-            f"{int(confidence * 100)}%"
+            f"{int(confidence * 100)}% | "
+            f"Source: {decision_source}"
         )
 
         # =====================================================
@@ -352,6 +363,10 @@ class MultiAgentOrchestrator:
             "user_question": user_question,
 
             "decision": decision,
+            
+            "decision_source": decision_source,
+            
+            "fallback_used": fallback_used,
 
             "confidence": confidence,
 

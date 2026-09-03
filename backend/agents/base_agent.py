@@ -28,7 +28,10 @@ class BaseAgent:
     """
     AGENT_ID: str = "base"
     TIME_HORIZON: str = "MEDIUM_TERM"
-    TEMPERATURE: float = 0.2
+    TEMPERATURE: float = 0.1
+
+    # Shared cooldown state across all agent instances in the same process
+    _provider_cooldowns: Dict[str, float] = {}
 
     def __init__(self):
         groq_key       = os.getenv("GROQ_API_KEY")
@@ -91,8 +94,20 @@ class BaseAgent:
         """
         timeout = aiohttp.ClientTimeout(total=14)
         last_error = None
+        
+        try:
+            cooldown_seconds = int(os.getenv("GROQ_PROVIDER_COOLDOWN_SECONDS", "30"))
+        except ValueError:
+            cooldown_seconds = 30
 
         for provider in self.providers:
+            provider_name = provider["name"]
+            provider_family = provider_name.split()[0]  # e.g., "Groq", "OpenRouter"
+
+            # Check shared cooldown
+            if time.time() < BaseAgent._provider_cooldowns.get(provider_family, 0):
+                continue
+
             start_time = time.time()
             try:
                 payload = {
@@ -105,21 +120,38 @@ class BaseAgent:
                     ],
                 }
 
+                if provider_family == "Groq":
+                    payload["response_format"] = {"type": "json_object"}
+
                 async with session.post(provider["url"], headers=provider["headers"], json=payload, timeout=timeout) as resp:
+                    if resp.status == 429:
+                        raise aiohttp.ClientResponseError(
+                            resp.request_info,
+                            resp.history,
+                            status=resp.status,
+                            message="Too Many Requests",
+                            headers=resp.headers,
+                        )
                     resp.raise_for_status()
                     data = await resp.json()
                     
                     raw_content = data["choices"][0]["message"]["content"]
-                    cleaned = self._clean_llm_text(raw_content)
                     latency = round((time.time() - start_time) * 1000, 1)
 
-                    print(f"  ⚡ [{analysis_id}] [{self.AGENT_ID}] Success via {provider['name']} ({provider['model']}) in {latency}ms")
-                    return cleaned, provider["name"], provider["model"]
+                    print(f"  ⚡ [{analysis_id}] [{self.AGENT_ID}] Success via {provider_name} ({provider['model']}) in {latency}ms")
+                    return raw_content, provider_name, provider["model"]
 
             except Exception as e:
                 latency = round((time.time() - start_time) * 1000, 1)
                 last_error = str(e)
-                print(f"  ⚠️ [{analysis_id}] [{self.AGENT_ID}] {provider['name']} failed in {latency}ms: {last_error}")
+
+                is_429 = getattr(e, 'status', None) == 429 or "429" in str(e) or "Too Many Requests" in str(e)
+                if is_429:
+                    print(f"  ⚠️ [{analysis_id}] [{self.AGENT_ID}] {provider_family} rate limited (429). Skipping remaining {provider_family} providers and moving to fallback.")
+                    BaseAgent._provider_cooldowns[provider_family] = time.time() + cooldown_seconds
+                    continue
+                
+                print(f"  ⚠️ [{analysis_id}] [{self.AGENT_ID}] {provider_name} failed in {latency}ms: {last_error}")
                 await asyncio.sleep(0.3)
 
         return None, None, None
@@ -127,60 +159,47 @@ class BaseAgent:
     # ── Text & JSON Sanitization ──────────────────────────────────────────────
 
     @staticmethod
-    def _clean_llm_text(text: str) -> str:
-        """Strips <think> tags from thinking models and removes markdown code fences."""
-        if not text:
-            return ""
+    def parse_json_response(content: str) -> Dict[str, Any]:
+        if not content:
+            raise ValueError("Empty LLM response")
+            
+        content = content.strip()
 
-        # Pass 1: Remove <think>...</think> blocks
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-        # Pass 2: Remove unclosed <think>...
+        # Remove Markdown code fences if the model still returns them.
+        if content.startswith("```"):
+            content = content.replace("```json", "", 1)
+            content = content.replace("```", "", 1)
+            content = content.strip()
+            
+        # Also clean up trailing tags if it's a thinking model (since it might output <think>)
+        cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
         cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
         cleaned = cleaned.replace("</think>", "").strip()
-
-        # Pass 3: Strip markdown fences (```json ... ```)
-        cleaned = re.sub(r"^```(?:json)?", "", cleaned.strip(), flags=re.IGNORECASE)
-        cleaned = re.sub(r"```$", "", cleaned.strip())
-
-        # Pass 4: Extract JSON object substring between first '{' and last '}'
+        
+        # Ensure it's json bounded
         start_idx = cleaned.find("{")
         end_idx = cleaned.rfind("}")
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             cleaned = cleaned[start_idx : end_idx + 1]
-
-        return cleaned.strip()
-
-    @staticmethod
-    def _safe_json_loads(text: str) -> Dict[str, Any]:
-        """
-        Parses JSON with multiple repair heuristics for common LLM syntax flaws.
-        """
-        if not text:
-            raise ValueError("Empty response text")
-
-        # 1. Standard json.loads
-        try:
-            return json.loads(text)
-        except Exception:
-            pass
-
-        # 2. Heuristic: Remove trailing commas before closing braces/brackets
-        cleaned = re.sub(r",\s*([\]}])", r"\1", text)
+            
+        # Optional heuristics for trailing commas and newlines
         try:
             return json.loads(cleaned)
         except Exception:
-            pass
+            # 2. Heuristic: Remove trailing commas before closing braces/brackets
+            cleaned_patched = re.sub(r",\s*([\]}])", r"\1", cleaned)
+            try:
+                return json.loads(cleaned_patched)
+            except Exception:
+                pass
 
-        # 3. Heuristic: Replace raw newlines/tabs inside string literals
-        cleaned = re.sub(r'(?<!\\)\n', ' ', cleaned)
-        cleaned = re.sub(r'(?<!\\)\t', ' ', cleaned)
-        try:
-            return json.loads(cleaned)
-        except Exception:
-            pass
+            # 3. Heuristic: Replace raw newlines/tabs inside string literals
+            cleaned_patched = re.sub(r'(?<!\\)\n', ' ', cleaned_patched)
+            cleaned_patched = re.sub(r'(?<!\\)\t', ' ', cleaned_patched)
+            
+            # Standard fallback to raise informative error
+            return json.loads(cleaned_patched)
 
-        # 4. Standard fallback to raise informative error
-        return json.loads(text)
 
     # ── Schema Validation & Correction Retry ──────────────────────────────────
 
@@ -203,7 +222,7 @@ class BaseAgent:
 
         # Attempt 1: Parse and validate
         try:
-            parsed = self._safe_json_loads(raw_text)
+            parsed = self.parse_json_response(raw_text)
             is_valid, err_msg = validator_func(parsed)
             if is_valid:
                 parsed["status"] = "SUCCESS"
@@ -224,7 +243,7 @@ class BaseAgent:
 
         if corr_text:
             try:
-                parsed = self._safe_json_loads(corr_text)
+                parsed = self.parse_json_response(corr_text)
                 is_valid, err_msg = validator_func(parsed)
                 if is_valid:
                     parsed["status"] = "SUCCESS"

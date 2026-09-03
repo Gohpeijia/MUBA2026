@@ -51,7 +51,9 @@ IMPORTANT DECISION RULES:
 17. SELL requires meaningful bearish evidence, not merely the absence of bullish evidence.
 18. Confidence measures strength and consistency of supplied evidence, NOT probability of future returns.
 19. Construct a genuine bull case and bear case from supplied evidence.
-20. Return ONLY valid JSON.
+20. JSON ONLY. No Markdown, no code fences.
+21. Use short strings and controlled list sizes (max 3 items per list).
+22. Provide NO unnecessary explanation outside the JSON object.
 
 For the quantitative screen:
 - It is NOT the final decision.
@@ -101,7 +103,7 @@ Float between 0.0 and 1.0.
 class CommitteeAgent(BaseAgent):
     AGENT_ID = "committee"
     TIME_HORIZON = "SYNTHESIZED"
-    TEMPERATURE = 0.15  # Low temperature for measured, consistent decision synthesis
+    TEMPERATURE = 0.1  # Low temperature for measured, consistent decision synthesis
 
     @staticmethod
     def validate_report(data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -161,6 +163,8 @@ class CommitteeAgent(BaseAgent):
             data["summary"] = summary_str[:800]
 
         data["agent"] = "committee"
+        data["decision_source"] = "LLM_COMMITTEE"
+        data["fallback_used"] = False
         return True, None
 
     def generate_fallback_synthesis(
@@ -291,6 +295,8 @@ class CommitteeAgent(BaseAgent):
             "status": "SUCCESS",
             "time_horizon": self.TIME_HORIZON,
             "provider_used": "Rule-Based Synthesis (Deterministic Fallback)",
+            "decision_source": "RULE_BASED_FALLBACK",
+            "fallback_used": True,
             "symbol": symbol,
             "decision": decision,
             "confidence": confidence,
