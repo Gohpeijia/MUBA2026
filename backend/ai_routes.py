@@ -15,6 +15,8 @@ agent = AIAgent()
 # was shown in the preview before we treat it as a material change and
 # stop to re-confirm rather than silently filling at a different price.
 PRICE_MATERIAL_CHANGE_PCT = 0.03  # 3%
+CONFIRMATION_MODE = "Suggest actions, I confirm each one"
+AUTOMATED_MODE = "Fully automated recommendations"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  INTERNAL HELPERS
@@ -68,6 +70,267 @@ def _get_preferences(user_id: str) -> dict:
     if doc.exists:
         return doc.to_dict().get("preference", {})
     return {}
+
+
+def _execution_mode(preferences: dict) -> str:
+    """
+    Normalize the saved preference used by both chat and confirmation.
+
+    The current Preferences screen stores riskCopilotMode. The boolean
+    confirmation_required is also accepted for older profiles so a user
+    cannot accidentally get a confirmation modal after choosing automation.
+    """
+    mode = preferences.get("riskCopilotMode")
+    if mode in (CONFIRMATION_MODE, AUTOMATED_MODE, "Alert me only, I act manually"):
+        return mode
+    if preferences.get("confirmation_required") is False:
+        return AUTOMATED_MODE
+    return CONFIRMATION_MODE
+
+
+def _order_field(order: dict, *names):
+    """Return the first populated field from a normalized/raw order."""
+    for name in names:
+        value = order.get(name)
+        if value is not None:
+            return value
+    return None
+
+
+def _same_contract(order: dict, option_type, strike, expiry) -> bool:
+    """Match a live order by stable contract identity, never by index."""
+    order_type = _order_field(order, "option_type", "optionType", "type")
+    order_strike = _order_field(order, "strike", "strikePrice", "strike_price")
+    order_expiry = _order_field(
+        order,
+        "expiry",
+        "expiryTimestamp",
+        "expiration",
+        "expirationTimestamp",
+    )
+
+    try:
+        normalized_expiry = trader._normalize_expiry(order_expiry)
+        expected_normalized_expiry = trader._normalize_expiry(expiry)
+        same_strike = abs(float(order_strike) - float(strike)) <= 1e-8
+    except (TypeError, ValueError):
+        return False
+
+    return (
+        str(order_type).strip().upper() == str(option_type).strip().upper()
+        and same_strike
+        and normalized_expiry == expected_normalized_expiry
+    )
+
+
+def _execute_automated_trade(proposal: dict) -> dict:
+    """
+    Execute a proposal for the explicit fully-automated preference.
+
+    BUY still re-reads the live order book and validates the risk gate.
+    SELL still re-reads the live position and only closes an RFQ position.
+    FORCE_DRY_RUN remains the final switch that prevents all blockchain
+    writes while preserving the live preview path.
+    """
+    selector = (proposal or {}).get("selector") or {}
+    decision = str(
+        selector.get("decision")
+        or proposal.get("decision")
+        or ""
+    ).upper().strip()
+
+    ticker = selector.get("underlying") or proposal.get("underlying")
+    option_type = selector.get("option_type") or proposal.get("option_type")
+    strike = selector.get("strike") or proposal.get("strike")
+    expiry = selector.get("expiry") or proposal.get("expiry")
+
+    if not ticker or not option_type or strike is None or expiry is None:
+        return {
+            "ok": False,
+            "status": "FAILED",
+            "error": "Automated trade was blocked: incomplete stable contract selector.",
+        }
+
+    if decision == "BUY":
+        collateral_usdc = selector.get("collateral_usdc")
+        if collateral_usdc is None:
+            collateral_usdc = proposal.get("collateral_usdc")
+
+        orders = trader.get_live_orders(
+            underlying=ticker,
+            option_type=option_type,
+        )
+        if not orders.get("ok"):
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": orders.get("error") or "Unable to read the live OptionBook.",
+            }
+
+        current_order = next(
+            (
+                order for order in orders.get("data", [])
+                if isinstance(order, dict)
+                and _same_contract(order, option_type, strike, expiry)
+            ),
+            None,
+        )
+        if current_order is None:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": (
+                    "Automated BUY was blocked: the approved contract is "
+                    "no longer available on the live OptionBook."
+                ),
+            }
+
+        wallet = trader.get_wallet_balance()
+        if not wallet.get("ok"):
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": wallet.get("error") or "Unable to read wallet balance.",
+            }
+
+        valid, reason = validate_confirmation(
+            selector=selector,
+            wallet=wallet,
+            collateral_usdc=float(collateral_usdc),
+            current_order=current_order,
+        )
+        if not valid:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": f"Trade blocked by risk validator: {reason}",
+            }
+
+        execution = trader.execute_fill(
+            collateral_usdc=float(collateral_usdc),
+            underlying=str(ticker).upper(),
+            option_type=str(option_type).upper(),
+            strike=strike,
+            expiry=expiry,
+            dry_run=FORCE_DRY_RUN,
+        )
+        if not FORCE_DRY_RUN and execution.get("ok"):
+            _log_thetanuts_trade({
+                "ticker": ticker,
+                "decision": "BUY",
+                "action": "AUTO",
+                "status": execution.get("status"),
+                "amount_usdc": collateral_usdc,
+                "tx_hash": execution.get("tx_hash"),
+                "approval_tx_hash": execution.get("approval_tx_hash"),
+                "fill_tx_hash": execution.get("fill_tx_hash"),
+                "dry_run": False,
+                "error": execution.get("error"),
+            })
+        return execution
+
+    if decision == "SELL":
+        live_position = trader.find_position(
+            underlying=ticker,
+            option_type=option_type,
+            strike=strike,
+            expiry=expiry,
+        )
+        position = live_position.get("position") if live_position.get("ok") else None
+        if not live_position.get("ok") or position is None:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": (
+                    live_position.get("error")
+                    or "Automated SELL was blocked: no matching live position."
+                ),
+            }
+
+        if trader.get_position_source(position) != "rfq":
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": (
+                    "Automated SELL was blocked: only live RFQ position "
+                    "closing is supported."
+                ),
+            }
+
+        position_address = trader.get_position_address(position)
+        if not position_address:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": "Automated SELL was blocked: position address is missing.",
+            }
+
+        close_result = trader.close_rfq_position(
+            position_address=position_address,
+            reserve_price=selector.get("reserve_price") or proposal.get("reserve_price"),
+            dry_run=FORCE_DRY_RUN,
+        )
+        if not close_result.get("ok") or FORCE_DRY_RUN:
+            return close_result
+
+        tx_hash = close_result.get("tx_hash")
+        transaction = trader.wait_for_transaction(tx_hash=tx_hash)
+        if not transaction.get("ok"):
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "tx_hash": tx_hash,
+                "receipt_confirmed": transaction.get("confirmed", False),
+                "error": transaction.get("error") or "Automated SELL was not confirmed.",
+                "transaction": transaction,
+            }
+
+        verification = trader.verify_position_closed(
+            underlying=ticker,
+            option_type=option_type,
+            strike=strike,
+            expiry=expiry,
+        )
+        if not verification.get("ok") or not verification.get("closed"):
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "tx_hash": tx_hash,
+                "receipt_confirmed": True,
+                "error": (
+                    "Automated SELL was confirmed on Base, but the live "
+                    "position could not be verified as closed."
+                ),
+                "transaction": transaction,
+                "verification": verification,
+            }
+
+        result = {
+            **close_result,
+            "ok": True,
+            "status": "EXECUTED",
+            "tx_hash": tx_hash,
+            "receipt_confirmed": True,
+            "transaction": transaction,
+            "verification": verification,
+        }
+        _log_thetanuts_trade({
+            "ticker": ticker,
+            "decision": "SELL",
+            "action": "AUTO",
+            "status": result["status"],
+            "tx_hash": tx_hash,
+            "dry_run": False,
+            "position_address": position_address,
+            "error": None,
+        })
+        return result
+
+    return {
+        "ok": False,
+        "status": "FAILED",
+        "error": f"Unsupported automated trade decision: {decision or 'missing'}.",
+    }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  POST /chat  —  send a message, get AI response
@@ -124,6 +387,33 @@ def chat_with_agent():
 
         if result.get("status") == "ERROR":
             return jsonify({"success": False, "error": result["final_advice"]}), 503
+
+        # Respect the user's execution preference at the server boundary.
+        # Confirmation mode leaves the proposal for the explicit confirm
+        # action. Fully automated mode executes the proposal immediately
+        # (or produces the same safe dry-run preview while FORCE_DRY_RUN is
+        # enabled). Alert-only mode never exposes an executable action to
+        # the frontend.
+        if result.get("trade_status") == "EXECUTABLE":
+            copilot_mode = _execution_mode(preferences)
+            proposal = result.get("trade_proposal")
+
+            if copilot_mode == AUTOMATED_MODE and proposal:
+                auto_execution = _execute_automated_trade(proposal)
+                result["auto_execution"] = auto_execution
+                result["trade_proposal"] = None
+                result["trade_status"] = auto_execution.get("status", "FAILED")
+                result["trade_reason"] = auto_execution.get(
+                    "error",
+                    "Automated trade execution completed.",
+                )
+
+            elif copilot_mode != CONFIRMATION_MODE:
+                result["trade_proposal"] = None
+                result["trade_status"] = "RECOMMEND_ONLY"
+                result["trade_reason"] = (
+                    "Alert-only mode is enabled. No trade was executed."
+                )
 
         # NOTE: Firestore persistence removed here to ensure browser-scoped privacy constraints
 
@@ -225,12 +515,9 @@ def confirm_trade():
         # ---------------------------------------------------------------
         preferences = _get_preferences(user_id)
 
-        copilot_mode = preferences.get(
-            "riskCopilotMode",
-            "Suggest actions, I confirm each one"
-        )
+        copilot_mode = _execution_mode(preferences)
 
-        if copilot_mode != "Suggest actions, I confirm each one":
+        if copilot_mode != CONFIRMATION_MODE:
             return jsonify({
                 "success": False,
                 "error": (
@@ -267,12 +554,12 @@ def confirm_trade():
             current_order = next(
                 (
                     o for o in orders["data"]
-                    if (o.get("type") or o.get("optionType")) == option_type
-                    and o.get("strike") == expected_strike
-                    and (
-                        o.get("expiry")
-                        or o.get("expiryTimestamp")
-                    ) == expected_expiry
+                    if _same_contract(
+                        o,
+                        option_type,
+                        expected_strike,
+                        expected_expiry,
+                    )
                 ),
                 None,
             )
@@ -282,21 +569,30 @@ def confirm_trade():
             if rolled_off:
                 current_order = orders["data"][0]
 
-            current_type = (
-                current_order.get("type")
-                or current_order.get("optionType")
+            current_type = _order_field(
+                current_order,
+                "option_type",
+                "optionType",
+                "type",
             )
-
-            current_strike = current_order.get("strike")
-
-            current_expiry = (
-                current_order.get("expiry")
-                or current_order.get("expiryTimestamp")
+            current_strike = _order_field(
+                current_order,
+                "strike",
+                "strikePrice",
+                "strike_price",
             )
-
-            current_price = (
-                current_order.get("price")
-                or current_order.get("premium")
+            current_expiry = _order_field(
+                current_order,
+                "expiry",
+                "expiryTimestamp",
+                "expiration",
+                "expirationTimestamp",
+            )
+            current_price = _order_field(
+                current_order,
+                "price_per_contract",
+                "price",
+                "premium",
             )
 
             # -----------------------------------------------------------
@@ -403,18 +699,36 @@ def confirm_trade():
                 dry_run=FORCE_DRY_RUN,
             )
 
-            _log_thetanuts_trade({
-                "ticker": ticker,
-                "decision": "BUY",
-                "action": data.get("action", "CONFIRM"),
-                "status": execution_result["status"],
-                "amount_usdc": collateral_usdc,
-                "order_index": execution_result.get("order_index"),
-                "tx_hash": execution_result.get("tx_hash"),
-                "wallet_tradable_usdc": tradable_usdc,
-                "dry_run": FORCE_DRY_RUN,
-                "error": execution_result.get("error"),
-            })
+            if not FORCE_DRY_RUN:
+                _log_thetanuts_trade({
+                    "ticker": ticker,
+                    "decision": "BUY",
+                    "action": data.get("action", "CONFIRM"),
+                    "status": execution_result["status"],
+                    "amount_usdc": collateral_usdc,
+                    "order_index": None,
+                    "tx_hash": execution_result.get("tx_hash"),
+                    "approval_tx_hash": execution_result.get("approval_tx_hash"),
+                    "fill_tx_hash": execution_result.get("fill_tx_hash"),
+                    "wallet_tradable_usdc": tradable_usdc,
+                    "dry_run": False,
+                    "error": execution_result.get("error"),
+                })
+
+            if not execution_result.get("ok"):
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        execution_result.get("error")
+                        or "BUY transaction failed."
+                    ),
+                    "data": {
+                        "decision": "BUY",
+                        "status": execution_result.get("status", "FAILED"),
+                        "execution": execution_result,
+                        "dry_run": FORCE_DRY_RUN,
+                    },
+                }), 409
 
             return jsonify({
                 "success": True,
@@ -448,7 +762,7 @@ def confirm_trade():
                 ),
             }), 409
 
-        if not live_position.get("found"):
+        if live_position.get("position") is None:
             return jsonify({
                 "success": False,
                 "error": (
@@ -593,25 +907,40 @@ def confirm_trade():
             dry_run=FORCE_DRY_RUN,
         )
 
-        _log_thetanuts_trade({
-            "ticker": ticker,
-            "decision": "SELL",
-            "action": data.get("action", "CONFIRM"),
-            "status": close_result["status"],
-            "amount_usdc": None,
-            "order_index": None,
-            "reserve_price": reserve_price,
-            "tx_hash": close_result.get("tx_hash"),
-            "wallet_tradable_usdc": wallet_balance.get(
-                "tradable_usdc"
-            ),
-            "dry_run": FORCE_DRY_RUN,
-            "position_source": position_source,
-            "position_address": position_address,
-            "error": close_result.get("error"),
-        })
+        
+        if not close_result.get("ok"):
+            if not FORCE_DRY_RUN:
+                _log_thetanuts_trade({
+                    "ticker": ticker,
+                    "decision": "SELL",
+                    "action": data.get("action", "CONFIRM"),
+                    "status": close_result.get("status", "FAILED"),
+                    "amount_usdc": None,
+                    "order_index": None,
+                    "reserve_price": reserve_price,
+                    "tx_hash": close_result.get("tx_hash"),
+                    "wallet_tradable_usdc": wallet_balance.get("tradable_usdc"),
+                    "dry_run": False,
+                    "position_source": position_source,
+                    "position_address": position_address,
+                    "error": close_result.get("error"),
+                })
 
-        # ---------------------------------------------------------------
+            return jsonify({
+                "success": False,
+                "error": (
+                    close_result.get("error")
+                    or "The RFQ close operation failed."
+                ),
+                "data": {
+                    "decision": "SELL",
+                    "execution": close_result,
+                    "position_verified_closed": False,
+                    "dry_run": FORCE_DRY_RUN,
+                },
+            }), 409
+
+                # ---------------------------------------------------------------
         # 7B. If dry-run, don't pretend the position closed
         # ---------------------------------------------------------------
         if FORCE_DRY_RUN:
@@ -619,7 +948,7 @@ def confirm_trade():
                 "success": True,
                 "data": {
                     "decision": "SELL",
-                    "status": close_result["status"],
+                    "status": close_result.get("status"),
                     "execution": close_result,
                     "position_verified_closed": False,
                     "dry_run": True,
@@ -627,11 +956,50 @@ def confirm_trade():
             })
 
         # ---------------------------------------------------------------
-        # 8B. IMPORTANT:
-        # A successful CLI call / tx submission does NOT by itself mean
-        # the position is actually gone.
-        #
-        # Re-query the live position.
+        # 8B. Wait for blockchain confirmation
+        # ---------------------------------------------------------------
+        tx_hash = close_result.get("tx_hash")
+
+        if not tx_hash:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "SELL was submitted without a transaction hash. "
+                    "The position was NOT verified as closed. "
+                    "Firestore was NOT changed."
+                ),
+                "data": {
+                    "decision": "SELL",
+                    "execution": close_result,
+                    "position_verified_closed": False,
+                    "dry_run": False,
+                },
+            }), 409
+
+        transaction = trader.wait_for_transaction(
+            tx_hash=tx_hash,
+            timeout=120,
+            poll_latency=2.0,
+        )
+
+        if not transaction.get("ok"):
+            return jsonify({
+                "success": False,
+                "error": (
+                    transaction.get("error")
+                    or "SELL transaction was not successfully confirmed on Base."
+                ),
+                "data": {
+                    "decision": "SELL",
+                    "execution": close_result,
+                    "transaction": transaction,
+                    "position_verified_closed": False,
+                    "dry_run": False,
+                },
+            }), 409
+
+        # ---------------------------------------------------------------
+        # 9B. Confirm that the live position actually disappeared
         # ---------------------------------------------------------------
         verification = trader.verify_position_closed(
             underlying=ticker,
@@ -644,14 +1012,17 @@ def confirm_trade():
             return jsonify({
                 "success": False,
                 "error": (
-                    "SELL transaction was submitted, but the live "
+                    "SELL transaction was confirmed on Base, but the live "
                     "position could not be verified as closed. "
                     "Firestore was NOT changed."
                 ),
                 "data": {
                     "decision": "SELL",
                     "execution": close_result,
+                    "transaction": transaction,
                     "verification": verification,
+                    "position_verified_closed": False,
+                    "dry_run": False,
                 },
             }), 409
 
@@ -659,39 +1030,42 @@ def confirm_trade():
             return jsonify({
                 "success": False,
                 "error": (
-                    "SELL transaction completed, but the live "
+                    "SELL transaction was confirmed on Base, but the live "
                     "Thetanuts position is still open. "
                     "Firestore was NOT changed."
                 ),
                 "data": {
                     "decision": "SELL",
                     "execution": close_result,
+                    "transaction": transaction,
                     "verification": verification,
+                    "position_verified_closed": False,
+                    "dry_run": False,
                 },
             }), 409
 
         # ---------------------------------------------------------------
-        # 9B. Position is confirmed closed on-chain.
+        # 10B. Position is confirmed closed on-chain.
         #
-        # DO NOT calculate wallet balance manually.
-        # Read it again from Base.
+        # Read the wallet again from Base.
         # ---------------------------------------------------------------
         wallet_after = trader.get_wallet_balance()
 
         # ---------------------------------------------------------------
-        # 10B. Only NOW should Firestore position state be changed.
+        # 11B. Firestore update goes HERE.
         #
-        # IMPORTANT:
-        # Insert your existing Firestore position-removal/update logic
-        # here. Do not delete/update it before verification above.
+        # Do not update Firestore before the on-chain position has
+        # disappeared.
         # ---------------------------------------------------------------
 
         return jsonify({
             "success": True,
             "data": {
                 "decision": "SELL",
-                "status": close_result["status"],
+                "status": close_result.get("status"),
                 "execution": close_result,
+                "transaction": transaction,
+                "verification": verification,
                 "position_verified_closed": True,
                 "wallet_after": wallet_after,
                 "dry_run": False,
@@ -704,59 +1078,3 @@ def confirm_trade():
             "success": False,
             "error": "Could not confirm trade.",
         }), 500
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  GET /history  —  called on page load to repopulate the chat window
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@ai_bp.route('/history', methods=['GET'])
-@require_auth
-def get_history():
-    try:
-        user_id    = g.uid
-        session_id = request.args.get('session_id') or datetime.now().strftime("%Y-%m-%d")
-        limit      = int(request.args.get('limit', 20))
-
-        history = _load_history(user_id, session_id, limit=limit)
-
-        return jsonify({
-            "success":    True,
-            "session_id": session_id,
-            "history":    history,
-        })
-
-    except Exception as e:
-        print(f"❌ [History Error] {str(e)}")
-        return jsonify({"success": False, "error": "Could not load history."}), 500
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  DELETE /history  —  clear chat button
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@ai_bp.route('/history', methods=['DELETE'])
-@require_auth
-def clear_history():
-    try:
-        user_id    = g.uid
-        session_id = (request.json or {}).get('session_id') or datetime.now().strftime("%Y-%m-%d")
-
-        docs  = _messages_ref(user_id, session_id).get()
-        batch = db.batch()
-        for doc in docs:
-            batch.delete(doc.reference)
-        batch.commit()
-
-        (
-            db.collection("users")
-              .document(user_id)
-              .collection("chat_sessions")
-              .document(session_id)
-              .delete()
-        )
-
-        return jsonify({"success": True, "cleared": session_id})
-
-    except Exception as e:
-        print(f"❌ [Clear History Error] {str(e)}")
-        return jsonify({"success": False, "error": "Could not clear history."}), 500
