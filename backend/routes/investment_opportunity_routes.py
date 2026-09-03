@@ -120,30 +120,112 @@ def _get_user_portfolio(user_id: str) -> dict:
         }
 
 
-def _user_holds_symbol(portfolio: dict, symbol: str) -> bool:
-    """True if the user's portfolio shows a positive-quantity position in
-    `symbol`. Used as a defense-in-depth guard before preparing a SELL —
-    the SELL scanner already only notifies holders, but /prepare shouldn't
-    trust the client-supplied analysis_id alone to imply ownership."""
-    positions = portfolio.get("positions", {})
+def _user_holds_symbol(
+    portfolio: dict,
+    symbol: str,
+) -> bool:
+    """
+    True when the user's portfolio contains a positive-quantity
+    position matching the requested symbol.
+    """
+    positions = portfolio.get(
+        "positions",
+        {},
+    )
+
     if not isinstance(positions, dict):
         return False
 
-    position = positions.get(symbol)
-    if position is None:
+    target_symbol = str(
+        symbol
+    ).strip().upper()
+
+    if not target_symbol:
         return False
 
-    if isinstance(position, dict):
-        qty = position.get("quantity", position.get("qty"))
-    elif isinstance(position, (int, float)):
-        qty = position
-    else:
-        qty = None
+    for position_symbol, position in positions.items():
+        normalized_symbol = str(
+            position_symbol
+        ).strip().upper()
 
-    try:
-        return qty is not None and float(qty) > 0
-    except (TypeError, ValueError):
-        return False
+        if normalized_symbol != target_symbol:
+            continue
+
+        if isinstance(position, dict):
+            qty = position.get(
+                "quantity",
+                position.get("qty"),
+            )
+        elif isinstance(position, (int, float)):
+            qty = position
+        else:
+            qty = None
+
+        try:
+            return (
+                qty is not None
+                and float(qty) > 0
+            )
+        except (TypeError, ValueError):
+            return False
+
+    return False
+
+def _filter_opportunities_for_user(
+    opportunities: list,
+    user_id: str,
+) -> list:
+    """
+    Return only opportunities the authenticated user is allowed to see.
+
+    BUY opportunities are global.
+
+    SELL opportunities are user-specific and are returned only when
+    the authenticated user currently holds the symbol.
+    """
+    filtered = []
+
+    for opportunity in opportunities:
+        if not isinstance(opportunity, dict):
+            continue
+
+        kind = str(
+            opportunity.get("kind", "BUY")
+        ).upper()
+
+        # BUY opportunities are market-wide.
+        if kind != "SELL":
+            safe_opportunity = dict(opportunity)
+
+            # Never expose internal holder information.
+            safe_opportunity.pop(
+                "holder_user_ids",
+                None,
+            )
+
+            filtered.append(safe_opportunity)
+            continue
+
+        # SELL opportunities must belong to the authenticated user.
+        holder_user_ids = opportunity.get(
+            "holder_user_ids",
+            [],
+        )
+
+        if user_id not in holder_user_ids:
+            continue
+
+        safe_opportunity = dict(opportunity)
+
+        # holder_user_ids is backend-only information.
+        safe_opportunity.pop(
+            "holder_user_ids",
+            None,
+        )
+
+        filtered.append(safe_opportunity)
+
+    return filtered
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,40 +233,84 @@ def _user_holds_symbol(portfolio: dict, symbol: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @opportunities_bp.route("", methods=["GET"])
+@require_auth
 def get_opportunities():
     """
-    Return the latest globally discovered BUY opportunities merged with
-    the latest portfolio-aware SELL opportunities.
+    Return opportunities visible to the authenticated user.
 
-    BUY discovery is not user-specific. SELL opportunities ARE tied to
-    specific holders (see "holder_user_ids" on each SELL entry) but this
-    endpoint still returns them all — per-user filtering/scoping for what
-    a given user should actually see happens client-side or in /prepare,
-    same as before.
+    BUY opportunities are global.
+
+    SELL opportunities are returned only when the authenticated
+    user currently holds the relevant symbol.
     """
     try:
+        user_id = g.uid
+
         buy = get_latest_buy_opportunities()
         sell = get_latest_sell_opportunities()
 
+        buy_opportunities = buy.get(
+            "opportunities",
+            [],
+        )
+
+        sell_opportunities = sell.get(
+            "opportunities",
+            [],
+        )
+
+        visible_buy = _filter_opportunities_for_user(
+            buy_opportunities,
+            user_id,
+        )
+
+        visible_sell = _filter_opportunities_for_user(
+            sell_opportunities,
+            user_id,
+        )
+
+        all_opportunities = (
+            visible_buy + visible_sell
+        )
+
+        generated_dates = list(
+            filter(
+                None,
+                [
+                    buy.get("generated_at"),
+                    sell.get("generated_at"),
+                ],
+            )
+        )
+
         merged = {
             "generated_at": max(
-                filter(None, [buy.get("generated_at"), sell.get("generated_at")]),
+                generated_dates,
                 default=None,
             ),
-            "status": buy.get("status", "AWAITING_SCAN"),
-            "opportunities": (
-                buy.get("opportunities", []) + sell.get("opportunities", [])
+            "status": buy.get(
+                "status",
+                "AWAITING_SCAN",
             ),
+            "opportunities": all_opportunities,
             "metadata": {
-                "buy": buy.get("metadata", {}),
-                "sell": sell.get("metadata", {}),
+                "buy": buy.get(
+                    "metadata",
+                    {},
+                ),
+                "sell": sell.get(
+                    "metadata",
+                    {},
+                ),
             },
         }
 
         return jsonify(merged), 200
 
     except Exception:
-        logger.exception("Failed to retrieve opportunities")
+        logger.exception(
+            "Failed to retrieve opportunities"
+        )
 
         return jsonify({
             "status": "ERROR",
@@ -197,6 +323,7 @@ def get_opportunities():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @opportunities_bp.route("/scan", methods=["POST"])
+@require_auth
 def trigger_scan():
     """
     Start a manual discovery scan asynchronously: BUY first, then SELL.
