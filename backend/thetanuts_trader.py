@@ -173,7 +173,7 @@ class ThetanutsTrader:
             cmd += ["--underlying", underlying]
         if option_type:
             cmd += ["--type", option_type]
-        if min_expiry:
+        if min_expiry is not None:
             cmd += ["--min-expiry", str(min_expiry)]
 
         try:
@@ -199,6 +199,536 @@ class ThetanutsTrader:
             return {"ok": False, "data": [], "error": f"Could not parse CLI output as JSON: {e}"}
         except Exception as e:
             return {"ok": False, "data": [], "error": str(e)}
+
+        # ──────────────────────────────────────────────────────────────────
+    #  POSITIONS
+    # ──────────────────────────────────────────────────────────────────
+    def get_positions(self, source: str = "all") -> dict:
+        """
+        Read the wallet's LIVE Thetanuts positions.
+
+        source:
+            all  -> book + rfq
+            book -> OptionBook positions only
+            rfq  -> RFQ positions only
+
+        Read-only. Never signs or sends a transaction.
+        """
+        if self.w3 is None or self.account is None:
+            return {
+                "ok": False,
+                "data": [],
+                "error": self._init_error or "Wallet not initialized.",
+            }
+
+        if source not in ("all", "book", "rfq"):
+            return {
+                "ok": False,
+                "data": [],
+                "error": "source must be one of: all, book, rfq",
+            }
+
+        cmd = [
+            "npx",
+            "@thetanuts-finance/cli",
+            "position",
+            "list",
+            "--address",
+            self.account.address,
+            "--source",
+            source,
+            "-o",
+            "json",
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                env=self.env,
+                timeout=45,
+            )
+
+            if result.returncode != 0:
+                return {
+                    "ok": False,
+                    "data": [],
+                    "error": (
+                        result.stderr
+                        or "Thetanuts position list exited non-zero."
+                    ).strip(),
+                }
+
+            try:
+                parsed = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                return {
+                    "ok": False,
+                    "data": [],
+                    "error": f"Could not parse position list JSON: {e}",
+                }
+
+            if isinstance(parsed, list):
+                positions = parsed
+
+            elif isinstance(parsed, dict):
+                positions = (
+                    parsed.get("positions")
+                    or parsed.get("data")
+                    or []
+                )
+
+            else:
+                positions = []
+
+            if not isinstance(positions, list):
+                positions = []
+
+            return {
+                "ok": True,
+                "data": positions,
+                "error": None,
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "data": [],
+                "error": "CLI timed out fetching positions.",
+            }
+
+        except Exception as e:
+            return {
+                "ok": False,
+                "data": [],
+                "error": str(e),
+            }
+
+    @staticmethod
+    def _normalize_expiry(value):
+        """
+        Normalize common Thetanuts expiry representations.
+
+        Supports:
+          - Unix timestamp
+          - numeric string
+          - ISO datetime string
+        """
+        if value is None:
+            return None
+
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            pass
+
+        if isinstance(value, str):
+            try:
+                normalized = value.strip()
+
+                if normalized.endswith("Z"):
+                    normalized = normalized[:-1] + "+00:00"
+
+                dt = datetime.fromisoformat(normalized)
+
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+
+                return int(dt.timestamp())
+
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+        return None
+
+    @staticmethod
+    def _position_field(position: dict, *names):
+        """Return the first non-None field from a position."""
+        for name in names:
+            value = position.get(name)
+            if value is not None:
+                return value
+        return None
+
+    def find_position(
+        self,
+        underlying: str,
+        option_type: str,
+        strike: float,
+        expiry: int,
+    ) -> dict:
+        """
+        Find the user's LIVE position matching the exact contract.
+
+        Firestore is deliberately NOT used as the source of truth.
+
+        Returns:
+            {
+                ok,
+                position,
+                matches,
+                error
+            }
+        """
+        result = self.get_positions("all")
+
+        if not result["ok"]:
+            return {
+                "ok": False,
+                "position": None,
+                "matches": [],
+                "error": result["error"],
+            }
+
+        positions = result["data"]
+
+        underlying_norm = str(underlying).strip().upper()
+        option_type_norm = str(option_type).strip().upper()
+
+        try:
+            target_strike = float(strike)
+        except (TypeError, ValueError):
+            return {
+                "ok": False,
+                "position": None,
+                "matches": [],
+                "error": f"Invalid strike: {strike}",
+            }
+
+        target_expiry = self._normalize_expiry(expiry)
+
+        if target_expiry is None:
+            return {
+                "ok": False,
+                "position": None,
+                "matches": [],
+                "error": f"Invalid expiry: {expiry}",
+            }
+
+        matches = []
+
+        for position in positions:
+            if not isinstance(position, dict):
+                continue
+
+            pos_underlying = self._position_field(
+                position,
+                "underlying",
+                "asset",
+                "underlyingAsset",
+                "underlying_asset",
+            )
+
+            pos_type = self._position_field(
+                position,
+                "optionType",
+                "type",
+                "option_type",
+                "option_type_name",
+            )
+
+            pos_strike = self._position_field(
+                position,
+                "strike",
+                "strikePrice",
+                "strike_price",
+            )
+
+            pos_expiry = self._position_field(
+                position,
+                "expiry",
+                "expiration",
+                "expirationTimestamp",
+                "expiration_timestamp",
+            )
+
+            if pos_underlying is None or pos_type is None:
+                continue
+
+            if str(pos_underlying).strip().upper() != underlying_norm:
+                continue
+
+            if str(pos_type).strip().upper() != option_type_norm:
+                continue
+
+            try:
+                if abs(float(pos_strike) - target_strike) > 1e-8:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            normalized_pos_expiry = self._normalize_expiry(pos_expiry)
+
+            if normalized_pos_expiry != target_expiry:
+                continue
+
+            matches.append(position)
+
+        if not matches:
+            return {
+                "ok": True,
+                "position": None,
+                "matches": [],
+                "error": None,
+            }
+
+        if len(matches) > 1:
+            return {
+                "ok": False,
+                "position": None,
+                "matches": matches,
+                "error": (
+                    "Multiple matching Thetanuts positions found. "
+                    "SELL requires an unambiguous position."
+                ),
+            }
+
+        return {
+            "ok": True,
+            "position": matches[0],
+            "matches": matches,
+            "error": None,
+        }
+
+    # ──────────────────────────────────────────────────────────────────
+    #  SELL / CLOSE RFQ POSITION
+    # ──────────────────────────────────────────────────────────────────
+    def close_rfq_position(
+        self,
+        position_address: str,
+        reserve_price: float = None,
+        deadline_minutes: int = 1,
+        fill_or_kill: bool = False,
+        ensure_allowance: bool = False,
+        approve_amount: str = None,
+        dry_run: bool = True,
+    ) -> dict:
+        """
+        Close an RFQ position using:
+
+            thetanuts position close --address <option-contract>
+
+        IMPORTANT:
+        This operation is specifically for RFQ positions.
+
+        dry_run=True is the default safety mode.
+        """
+        if not position_address:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "tx_hash": None,
+                "error": "position_address is required.",
+            }
+
+        if deadline_minutes < 1:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "tx_hash": None,
+                "error": "deadline_minutes must be >= 1.",
+            }
+
+        cmd = [
+            "npx",
+            "@thetanuts-finance/cli",
+            "position",
+            "close",
+            "--address",
+            str(position_address),
+            "--deadline-minutes",
+            str(deadline_minutes),
+            "-o",
+            "json",
+        ]
+
+        if reserve_price is not None:
+            cmd += [
+                "--reserve-price",
+                str(reserve_price),
+            ]
+
+        if fill_or_kill:
+            cmd.append("--fill-or-kill")
+
+        if ensure_allowance:
+            cmd.append("--ensure-allowance")
+
+        if approve_amount is not None:
+            cmd += [
+                "--approve-amount",
+                str(approve_amount),
+            ]
+
+        if dry_run:
+            cmd.append("--dry-run")
+        else:
+            cmd.append("--yes")
+
+        record = {
+            "action": "SELL",
+            "operation": "position_close",
+            "position_address": position_address,
+            "reserve_price": reserve_price,
+            "deadline_minutes": deadline_minutes,
+            "fill_or_kill": fill_or_kill,
+            "ensure_allowance": ensure_allowance,
+            "approve_amount": approve_amount,
+            "dry_run": dry_run,
+            "ok": False,
+            "status": "FAILED",
+            "tx_hash": None,
+            "error": None,
+        }
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                env=self.env,
+                timeout=120,
+            )
+
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+
+            if result.returncode != 0:
+                record["error"] = (
+                    stderr
+                    or stdout
+                    or "Thetanuts position close exited non-zero."
+                )[:2000]
+
+                self._log_transaction(record)
+                return record
+
+            try:
+                parsed = json.loads(stdout)
+
+            except json.JSONDecodeError:
+                record["error"] = (
+                    "Could not parse position close JSON: "
+                    f"{stdout[:1000]}"
+                )
+
+                self._log_transaction(record)
+                return record
+
+            record["ok"] = True
+            record["status"] = (
+                "DRY_RUN_OK"
+                if dry_run
+                else "EXECUTED"
+            )
+
+            record["tx_hash"] = (
+                parsed.get("txHash")
+                or parsed.get("tx_hash")
+                or parsed.get("transactionHash")
+            )
+
+            record["raw_response"] = parsed
+
+            self._log_transaction(record)
+
+            return record
+
+        except subprocess.TimeoutExpired:
+            record["error"] = (
+                "CLI timed out during RFQ position close."
+            )
+
+            self._log_transaction(record)
+            return record
+
+        except Exception as e:
+            record["error"] = str(e)
+
+            self._log_transaction(record)
+            return record
+
+    # ──────────────────────────────────────────────────────────────────
+    #  VERIFY SELL
+    # ──────────────────────────────────────────────────────────────────
+    def verify_position_closed(
+        self,
+        underlying: str,
+        option_type: str,
+        strike: float,
+        expiry: int,
+    ) -> dict:
+        """
+        Re-query LIVE Thetanuts positions after SELL.
+
+        A SELL is considered fully successful only when the matching
+        position disappears from the live position list.
+        """
+        result = self.find_position(
+            underlying=underlying,
+            option_type=option_type,
+            strike=strike,
+            expiry=expiry,
+        )
+
+        if not result["ok"]:
+            return {
+                "ok": False,
+                "closed": False,
+                "position": None,
+                "error": result["error"],
+            }
+
+        return {
+            "ok": True,
+            "closed": result["position"] is None,
+            "position": result["position"],
+            "error": None,
+        }
+
+    # ──────────────────────────────────────────────────────────────────
+    #  POSITION ADDRESS / SOURCE HELPERS
+    # ──────────────────────────────────────────────────────────────────
+    @staticmethod
+    def get_position_source(position: dict) -> str:
+        """
+        Normalize the position source.
+
+        Expected values:
+            book
+            rfq
+        """
+        if not isinstance(position, dict):
+            return ""
+
+        source = (
+            position.get("source")
+            or position.get("positionSource")
+            or position.get("position_source")
+            or ""
+        )
+
+        return str(source).strip().lower()
+
+    @staticmethod
+    def get_position_address(position: dict) -> str:
+        """
+        Extract the option contract address from CLI/indexer output.
+        """
+        if not isinstance(position, dict):
+            return ""
+
+        address = (
+            position.get("address")
+            or position.get("optionAddress")
+            or position.get("option_address")
+            or position.get("contractAddress")
+            or position.get("contract_address")
+            or ""
+        )
+
+        return str(address).strip()
 
     # ──────────────────────────────────────────────────────────────────
     #  FILL / EXECUTE
@@ -249,11 +779,25 @@ class ThetanutsTrader:
         anywhere else.
         """
         has_index = order_index is not None
-        has_selector = underlying and option_type and (strike is not None or strikes) and expiry
+
+        has_selector = (
+            underlying is not None
+            and option_type is not None
+            and (strike is not None or strikes is not None)
+            and expiry is not None
+        )
         if not has_index and not has_selector:
             return {
                 "ok": False, "status": "FAILED", "tx_hash": None,
                 "error": "Must provide either order_index, or underlying+option_type+strike(s)+expiry.",
+            }
+
+        if collateral_usdc is None or collateral_usdc <= 0:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "tx_hash": None,
+                "error": "collateral_usdc must be greater than 0 for BUY.",
             }
 
         cmd = [

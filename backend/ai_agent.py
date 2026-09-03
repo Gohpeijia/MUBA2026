@@ -23,8 +23,19 @@ try:
 except Exception:
     db = None
 
+# Must run BEFORE ThetanutsTrader() is constructed below — its __init__
+# reads WALLET_PRIVATE_KEY / BASE_RPC_URL from os.environ immediately, so
+# if .env hasn't been loaded yet at that point, the wallet silently fails
+# to initialize (self.w3/self.account stay None for the process lifetime)
+# even when the .env file itself is correct.
+load_dotenv()
+
 trader = ThetanutsTrader()
-FORCE_DRY_RUN = True
+
+# Real trades require FORCE_DRY_RUN=false in the environment — defaults to
+# True (dry-run) so a missing/misconfigured env var fails safe rather than
+# silently trading live.
+FORCE_DRY_RUN = os.getenv("FORCE_DRY_RUN", "true").strip().lower() != "false"
 
 def _log_thetanuts_trade(record: dict) -> None:
     if db is None:

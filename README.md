@@ -69,6 +69,46 @@
 
 ![alt text](image.png)
 
+
+                    /confirm-trade
+                          │
+                ┌─────────┴─────────┐
+                │                   │
+              BUY                 SELL
+                │                   │
+          live OptionBook      live positions
+                │                   │
+          validate funds       find exact position
+                │                   │
+          book fill             source?
+                                    │
+                              ┌─────┴─────┐
+                              │           │
+                             RFQ         Book
+                              │           │
+                         RFQ close      BLOCK
+                              │
+                       verify closed
+                              │
+                       wallet_after
+                              │
+                     update Firestore
+
+AI analyzes market
+      ↓
+AI decides: SELL / CLOSE
+      ↓
+Your system sends RFQ
+      ↓
+Thetanuts / market maker gives you an actual quote
+      ↓
+Example: "I will buy your position for $480"
+      ↓
+Your system decides whether $480 is acceptable
+      ↓
+Accept RFQ → position closes
+
+
 [![React](https://img.shields.io/badge/React-19+-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask)](https://flask.palletsprojects.com)
