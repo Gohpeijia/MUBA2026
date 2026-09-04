@@ -14,6 +14,7 @@ const STATUS_COPY = {
   EXECUTING: 'Execution is in progress.',
   EXECUTED: 'Trade completed.',
   DRY_RUN_OK: 'Dry run completed. No blockchain transaction was sent.',
+  PAPER_EXECUTED: 'Paper trade completed and the paper cash balance was updated.',
   REJECTED: 'You rejected this recommendation.',
   FAILED: 'Execution failed or was blocked.',
   EXPIRED: 'This confirmation link expired.',
@@ -140,7 +141,7 @@ export default function OpportunityConfirmation() {
     <main className="opp-confirm-page">
       <section className="opp-confirm-panel">
         <div className={`opp-confirm-status opp-confirm-status--${status.toLowerCase()}`}>
-          {['EXECUTED', 'DRY_RUN_OK'].includes(status) ? <FaCheckCircle /> : status === 'FAILED' ? <FaTimesCircle /> : <FaClock />}
+          {['EXECUTED', 'DRY_RUN_OK', 'PAPER_EXECUTED'].includes(status) ? <FaCheckCircle /> : status === 'FAILED' ? <FaTimesCircle /> : <FaClock />}
           <span>{status.replaceAll('_', ' ')}</span>
         </div>
 
@@ -164,6 +165,7 @@ export default function OpportunityConfirmation() {
             <Detail label="Symbol" value={displaySymbol} />
             <Detail label="Side" value={decision || 'N/A'} />
             <Detail label="Shares" value={proposal.shares || proposal.quantity || 'N/A'} />
+            <Detail label="Quantity source" value={(proposal.quantity_source || 'DEFAULT').replaceAll('_', ' ')} />
             <Detail label="Price" value={formatMoney(proposal.price)} />
             <Detail label="Estimated value" value={formatMoney(proposal.estimated_value || (Number(proposal.price) * Number(proposal.shares || proposal.quantity)))} />
           </dl>
@@ -195,4 +197,3 @@ export default function OpportunityConfirmation() {
     </main>
   );
 }
-
