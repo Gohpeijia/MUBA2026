@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +14,7 @@ from services.portfolio_service import (
 from services.trade_proposal_serializer import serialize_trade_proposal
 
 logger = logging.getLogger(__name__)
+DEFAULT_PAPER_PORTFOLIO_VALUE = float(os.getenv("PAPER_PORTFOLIO_VALUE_USD", "10000"))
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -44,6 +46,13 @@ def _parse_positive_int(value: Any, field_name: str) -> tuple[int | None, str | 
 def _risk_tolerance(preferences: dict | None) -> str:
     prefs = preferences if isinstance(preferences, dict) else {}
     return prefs.get("riskTolerance") or prefs.get("risk_tolerance") or "Moderate"
+
+
+def _portfolio_value_for_paper_trading(portfolio: dict) -> float:
+    portfolio_value = _to_float((portfolio or {}).get("total_value"))
+    if portfolio_value > 0:
+        return portfolio_value
+    return DEFAULT_PAPER_PORTFOLIO_VALUE
 
 
 def _analysis_price(analysis: dict | None, spot_price: Any = None) -> float:
@@ -113,7 +122,7 @@ def _find_legacy_holding(portfolio: list, symbol: str) -> dict | None:
 
 def _risk_gate(user_id: str, symbol: str, shares: int, price: float, preferences: dict | None = None) -> tuple[bool, str, dict]:
     portfolio = get_portfolio_state(user_id)
-    portfolio_value = _to_float(portfolio.get("total_value"))
+    portfolio_value = _portfolio_value_for_paper_trading(portfolio)
     if portfolio_value <= 0:
         return False, "Portfolio value is zero or unknown.", {}
 
@@ -180,7 +189,7 @@ def prepare_equity_proposal(
         shares = quantity
         risk = {}
     else:
-        portfolio_value = _to_float(portfolio.get("total_value"))
+        portfolio_value = _portfolio_value_for_paper_trading(portfolio)
         if portfolio_value <= 0:
             return {"status": "RECOMMEND_ONLY", "reason": "Portfolio value is unavailable, so no paper equity order was prepared.", "proposal": None}
 

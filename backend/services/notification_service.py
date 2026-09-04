@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from typing import List, Dict, Any
 
 from firebase_admin import messaging, firestore
@@ -16,6 +17,31 @@ SELL_CONFIDENCE_REALERT_DELTA = 0.10
 
 # A price deterioration of this percentage can bypass the cooldown.
 SELL_PRICE_REALERT_PERCENT = 5.0
+
+
+def _send_multicast(message):
+    if hasattr(messaging, "send_each_for_multicast"):
+        return messaging.send_each_for_multicast(message)
+
+    responses = []
+    for token in message.tokens or []:
+        single_message = messaging.Message(
+            notification=message.notification,
+            data=message.data,
+            token=token,
+        )
+
+        try:
+            messaging.send(single_message)
+            responses.append(SimpleNamespace(success=True, exception=None))
+        except Exception as exc:
+            responses.append(SimpleNamespace(success=False, exception=exc))
+
+    return SimpleNamespace(
+        success_count=sum(1 for resp in responses if resp.success),
+        failure_count=sum(1 for resp in responses if not resp.success),
+        responses=responses,
+    )
 
 
 def _collect_broadcast_tokens(db):
@@ -596,12 +622,7 @@ def notify_users_of_opportunities(
                 )
 
                 try:
-                    response = (
-                        messaging
-                        .send_each_for_multicast(
-                            message
-                        )
-                    )
+                    response = _send_multicast(message)
 
                     total_success += (
                         response.success_count
@@ -733,7 +754,7 @@ def _send_to_user(user_id: str, title: str, body: str, data: Dict[str, Any]) -> 
     )
 
     try:
-        response = messaging.send_each_for_multicast(message)
+        response = _send_multicast(message)
     except Exception:
         logger.exception("FCM send failed for user %s", user_id)
         return False
