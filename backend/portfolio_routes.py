@@ -40,6 +40,7 @@ def _record_trade(user_id: str, ticker: str, action: str, quantity: float,
         "companyName": company_name,
         "assetType":   "EQUITY",
         "asset_type":  "EQUITY",
+        "currency":    "USD",
         "reason":      reason,
         "timestamp":   datetime.now().isoformat(),
     })
@@ -575,19 +576,34 @@ def get_trades():
               .get()
         )
 
-        trades = [
-            {
-                "id":          d.id,
-                "ticker":      d.get("ticker"),
-                "action":      d.get("action"),
-                "quantity":    d.get("quantity"),
-                "price":       d.get("price"),
-                "companyName": d.get("companyName"),
-                "reason":      d.get("reason"),
-                "timestamp":   d.get("timestamp"),
-            }
-            for d in docs
-        ]
+        trades = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            asset_type = str(
+                data.get("assetType") or data.get("asset_type") or "EQUITY"
+            ).upper()
+            trades.append({
+                "id":             doc.id,
+                "ticker":         data.get("ticker"),
+                "action":         data.get("action"),
+                "quantity":       data.get("quantity"),
+                "price":          data.get("price"),
+                "companyName":    data.get("companyName"),
+                "reason":         data.get("reason"),
+                "timestamp":      data.get("timestamp"),
+                # These fields are required by InvestmentDashboard to avoid
+                # treating USDC option collateral as an equity share price.
+                "assetType":      asset_type,
+                "asset_type":     asset_type,
+                "currency":       data.get("currency") or ("USDC" if asset_type == "OPTION" else "USD"),
+                "optionType":     data.get("optionType"),
+                "strike":         data.get("strike"),
+                "expiry":         data.get("expiry"),
+                "fillPrice":      data.get("fillPrice"),
+                "collateralUsdc": data.get("collateralUsdc", data.get("collateral_usdc")),
+                "proceedsUsdc":   data.get("proceedsUsdc", data.get("proceeds_usdc")),
+                "feesUsdc":       data.get("feesUsdc", data.get("fees_usdc", 0)),
+            })
 
         return jsonify({
             "success": True,
