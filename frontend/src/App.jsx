@@ -7,9 +7,9 @@ import Stocks from './pages/Stocks';
 import Preferences from './pages/Preferences';
 import InvestmentDashboard from './pages/InvestmentDashboard';
 import OpportunityConfirmation from './pages/OpportunityConfirmation';
+import HedgingSettings from './pages/HedgingSettings';
 
-
-import { FaThLarge, FaRobot, FaSignOutAlt, FaChartLine, FaWallet } from 'react-icons/fa';
+import { FaThLarge, FaRobot, FaSignOutAlt, FaChartLine, FaWallet, FaCog } from 'react-icons/fa';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 
@@ -110,6 +110,10 @@ function NavBar() {
         <FaRobot />
         {!isStocks && <span>AI Advisor</span>}
       </Link>
+      <Link className="nav-settings" to="/settings" title="Settings">
+        <FaCog />
+        {!isStocks && <span>Settings</span>}
+      </Link>
 
       {/* Live, on-chain spendable capital — the exact number the AI
           agent sizes trades against. Compact pill so it fits both the
@@ -167,6 +171,11 @@ function AppShell() {
           <Route path="/advisor" element={
             <RequireAuth user={user} authLoading={authLoading}>
               <Advisor />
+            </RequireAuth>
+          } />
+          <Route path="/settings" element={
+            <RequireAuth user={user} authLoading={authLoading}>
+              <HedgingSettings />
             </RequireAuth>
           } />
           {/* Already logged in and hitting the login page (e.g. a refresh)?

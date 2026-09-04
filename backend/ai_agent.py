@@ -242,6 +242,7 @@ class AIAgent:
                     "model":       provider["model"],
                     "messages":    messages,
                     "temperature": 0.2,
+                    "max_tokens":  1200, 
                 }
 
                 response = requests.post(

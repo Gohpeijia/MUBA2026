@@ -620,6 +620,36 @@ def update_profile():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@portfolio_bp.route('/preference/hedging-agent', methods=['PATCH'])
+@require_auth
+def update_hedging_agent():
+    try:
+        user_id = g.uid
+        data = request.json
+        value = data.get('autoHedgingAgent', '')
+
+        valid_options = [
+            'Yes, fully autonomous hedging',
+            'Yes, but confirm before executing on-chain',
+            'No, I will hedge manually',
+        ]
+        if value not in valid_options:
+            return jsonify({"success": False, "error": "Invalid hedging mode."}), 400
+
+        # Dot-notation update — only touches this one nested field,
+        # leaves the rest of `preference` (riskTolerance, primaryGoal, etc.) untouched.
+        db.collection('users').document(user_id).update({
+            'preference.autoHedgingAgent': value
+        })
+
+        return jsonify({
+            "success": True,
+            "message": "Hedging Agent mode updated.",
+            "data": {"autoHedgingAgent": value}
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @portfolio_bp.route('/me', methods=['GET'])
 @require_auth
