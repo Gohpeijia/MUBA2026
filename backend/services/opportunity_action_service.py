@@ -3,7 +3,7 @@ import logging
 from firebase_config import db
 from services.opportunity_prepare_service import get_user_preferences
 from services.trade_confirmation_service import create_confirmation, mark_confirmation_notified
-from services.trade_execution_service import execute_trade_proposal
+from services.execution_service import execute_prepared_proposal
 from services.notification_service import (
     notify_alert_only,
     notify_confirmation_required,
@@ -60,7 +60,7 @@ def process_opportunity_for_user(opportunity: dict, user_id: str) -> dict:
         if not proposal:
             result = {"ok": False, "status": prepared.get("status") or "RECOMMEND_ONLY", "error": prepared.get("reason") or prepared.get("error")}
         else:
-            result = execute_trade_proposal(proposal, action="AUTO_OPPORTUNITY", user_id=user_id)
+            result = execute_prepared_proposal(user_id=user_id, proposal=proposal, action="AUTO_OPPORTUNITY")
         notify_execution_result(user_id=user_id, opportunity=opportunity, result=result)
         return {"user_id": user_id, "analysis_id": analysis_id, "mode": mode, "status": result.get("status"), "result": result}
 

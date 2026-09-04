@@ -33,6 +33,7 @@ from firebase_admin import firestore
 
 from investment import opportunity_engine
 from agents.orchestrator import MultiAgentOrchestrator
+from services.portfolio_service import get_portfolio_state
 
 logger = logging.getLogger(__name__)
 

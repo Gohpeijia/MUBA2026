@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any
 
 from firebase_admin import messaging, firestore
+from trading.execution_modes import CONFIRMATION_MODE, get_execution_mode
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _collect_broadcast_tokens(db):
         data = user_doc.to_dict() or {}
         prefs = data.get("preference", {})
 
-        if prefs.get("confirmation_required") is True:
+        if get_execution_mode(prefs) == CONFIRMATION_MODE:
             fcm_tokens = data.get("fcm_tokens", [])
 
             if isinstance(fcm_tokens, list):
@@ -75,7 +76,7 @@ def _collect_holder_tokens(db, holder_user_ids: List[str]):
         data = doc.to_dict() or {}
         prefs = data.get("preference", {})
 
-        if prefs.get("confirmation_required") is not True:
+        if get_execution_mode(prefs) != CONFIRMATION_MODE:
             continue
 
         fcm_tokens = data.get("fcm_tokens", [])

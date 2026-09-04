@@ -78,13 +78,17 @@ export default function OpportunityConfirmation() {
   const selector = confirmation?.selector || proposal.selector || confirmation?.selector_snapshot || {};
   const decision = (confirmation?.decision || selector.decision || proposal.action || '').toUpperCase();
   const isSell = decision === 'SELL';
+  const executionTarget = confirmation?.execution_target || proposal.execution_target;
+  const isPaperEquity = executionTarget === 'PAPER_EQUITY' || proposal.asset_type === 'EQUITY' || proposal.assetType === 'EQUITY';
+  const displaySymbol = confirmation?.symbol || proposal.symbol || proposal.ticker || selector.underlying || 'Opportunity';
   const status = confirmation?.status || 'PENDING';
   const canAct = ['PENDING', 'NEEDS_RECONFIRMATION'].includes(status);
 
   const title = useMemo(() => {
+    if (isPaperEquity) return isSell ? 'AI Paper Sell Confirmation' : 'AI Paper Buy Confirmation';
     if (isSell) return 'AI Sell Recommendation';
     return 'AI Trade Confirmation';
-  }, [isSell]);
+  }, [isPaperEquity, isSell]);
 
   const handleReject = async () => {
     setBusy('reject');
@@ -139,7 +143,7 @@ export default function OpportunityConfirmation() {
 
         <div className="opp-confirm-header">
           <span className="opp-confirm-eyebrow">{title}</span>
-          <h1>{decision || 'REVIEW'} {confirmation?.symbol || selector.underlying || proposal.ticker || 'Opportunity'}</h1>
+          <h1>{decision || 'REVIEW'} {displaySymbol}</h1>
           <p>{STATUS_COPY[status] || 'Review this AI opportunity.'}</p>
           {error && <p className="opp-confirm-error">{error}</p>}
         </div>
@@ -151,14 +155,24 @@ export default function OpportunityConfirmation() {
           <Detail label="Version" value={confirmation?.proposal_version || 1} />
         </div>
 
-        <h2>{isSell ? 'Current Position' : 'Contract'}</h2>
-        <dl className="opp-confirm-details">
-          <Detail label="Type" value={selector.option_type || proposal.option_type || 'N/A'} />
-          <Detail label="Strike" value={formatMoney(selector.strike || proposal.strike)} />
-          <Detail label="Expiry" value={formatExpiry(selector.expiry || proposal.expiry)} />
-          <Detail label={isSell ? 'Quantity' : 'Premium'} value={isSell ? (selector.quantity || selector.contracts || 'Full position') : formatMoney(selector.previewed_price || selector.price)} />
-          {!isSell && <Detail label="Proposed allocation" value={`${selector.collateral_usdc || proposal.collateral_usdc || proposal.proposed_amount_usdc || 'N/A'} USDC`} />}
-        </dl>
+        <h2>{isPaperEquity ? 'Paper Equity Order' : (isSell ? 'Current Position' : 'Contract')}</h2>
+        {isPaperEquity ? (
+          <dl className="opp-confirm-details">
+            <Detail label="Symbol" value={displaySymbol} />
+            <Detail label="Side" value={decision || 'N/A'} />
+            <Detail label="Shares" value={proposal.shares || proposal.quantity || 'N/A'} />
+            <Detail label="Price" value={formatMoney(proposal.price)} />
+            <Detail label="Estimated value" value={formatMoney(proposal.estimated_value || (Number(proposal.price) * Number(proposal.shares || proposal.quantity)))} />
+          </dl>
+        ) : (
+          <dl className="opp-confirm-details">
+            <Detail label="Type" value={selector.option_type || proposal.option_type || 'N/A'} />
+            <Detail label="Strike" value={formatMoney(selector.strike || proposal.strike)} />
+            <Detail label="Expiry" value={formatExpiry(selector.expiry || proposal.expiry)} />
+            <Detail label={isSell ? 'Quantity' : 'Premium'} value={isSell ? (selector.quantity || selector.contracts || 'Full position') : formatMoney(selector.previewed_price || selector.price)} />
+            {!isSell && <Detail label="Proposed allocation" value={`${selector.collateral_usdc || proposal.collateral_usdc || proposal.proposed_amount_usdc || 'N/A'} USDC`} />}
+          </dl>
+        )}
 
         {confirmation?.error && <p className="opp-confirm-note">{confirmation.error}</p>}
 
@@ -178,3 +192,4 @@ export default function OpportunityConfirmation() {
     </main>
   );
 }
+

@@ -17,6 +17,7 @@ import { AIAdvisorProvider, useAIAdvisor }  from './pages/AIAdvisorContext';
 import AIAdvisorPanel         from './pages/AIAdvisorPanel';
 import TextHighlightAsk       from './pages/TextHighlightAsk';
 import WalletBalance          from './pages/WalletBalance';
+import NotificationCenter     from './components/NotificationCenter';
 
 /**
  * NavBar — collapses to icon-only when on /stocks,
@@ -197,6 +198,8 @@ function AppShell() {
         </Routes>
       </div>
 
+      <NotificationCenter />
+
       {/* AI side panel */}
       {showPanel && (
         <>
@@ -219,3 +222,4 @@ function App() {
 }
 
 export default App;
+
