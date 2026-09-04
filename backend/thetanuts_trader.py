@@ -28,7 +28,7 @@ load_dotenv()
 
 # ── Base Mainnet constants ──────────────────────────────────────────────
 BASE_MAINNET_CHAIN_ID = 8453
-DEFAULT_RPC_URL = "https://mainnet.base.org"
+DEFAULT_RPC_URL = "http://127.0.0.1:8545"
 
 # Native USDC on Base.
 USDC_BASE_ADDRESS = Web3.to_checksum_address("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
