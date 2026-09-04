@@ -64,8 +64,9 @@ export default function WalletBalance({ variant = 'pill' }) {
   // (no key configured, RPC unreachable, etc). Both render as a
   // warning state, but the message differs.
   const walletUnreachable = !fetchError && balance && balance.ok === false;
-  const hasLiveBalance = !fetchError && balance && balance.ok === true;
-  const noTradableFunds = hasLiveBalance && balance.tradable_usdc === 0;
+  const hasPaperBalance = !fetchError && Number.isFinite(Number(balance?.paper_tradable_usd));
+  const paperCash = hasPaperBalance ? Number(balance.paper_tradable_usd) : 0;
+  const noTradableFunds = hasPaperBalance && paperCash <= 0;
 
   return (
     <div
@@ -102,11 +103,11 @@ export default function WalletBalance({ variant = 'pill' }) {
           </span>
         )}
 
-        {hasLiveBalance && (
+        {hasPaperBalance && (
           <>
             <div className="wallet-balance__row">
               <span className="wallet-balance__amount">
-                {balance.tradable_usdc.toFixed(2)}
+                {paperCash.toFixed(2)}
                 <span className="wallet-balance__unit"> USDC</span>
               </span>
               {variant === 'card' && (
@@ -116,9 +117,11 @@ export default function WalletBalance({ variant = 'pill' }) {
 
             {variant === 'card' && (
               <div className="wallet-balance__meta">
-                <span>{balance.usdc.toFixed(2)} USDC fake fund</span>
+                <span>{paperCash.toFixed(2)} USDC paper fund</span>
                 {balance.chain_wallet && (
                   <>
+                    <span className="wallet-balance__dot">·</span>
+                    <span>{Number(balance.chain_wallet.usdc || 0).toFixed(2)} on-chain USDC</span>
                     <span className="wallet-balance__dot">·</span>
                     <span>{Number(balance.chain_wallet.eth || 0).toFixed(5)} ETH gas</span>
                   </>
