@@ -156,6 +156,42 @@ function computeHoldings(trades, currentPrices) {
   });
 }
 
+// Realized option P&L is cash-based: USDC received when the position is
+// closed minus the USDC premiums paid for the matching contract. Open option
+// positions are intentionally not marked to market because the trade log does
+// not contain a trustworthy live option quote.
+function computeOptionRealizedPnl(trades) {
+  const openPremiumByContract = new Map();
+  let realizedPnl = 0;
+
+  const contractKey = (t) =>
+    [t.ticker, t.optionType, t.strike, t.expiry].map((v) => String(v ?? '')).join('|');
+
+  const sorted = [...trades]
+    .filter(isOptionTrade)
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  for (const trade of sorted) {
+    const key = contractKey(trade);
+    const action = String(trade.action || '').toLowerCase();
+    if (action === 'buy') {
+      const premium = Number(trade.collateralUsdc ?? trade.price);
+      if (Number.isFinite(premium) && premium >= 0) {
+        openPremiumByContract.set(key, (openPremiumByContract.get(key) || 0) + premium);
+      }
+    } else if (action === 'sell') {
+      const proceeds = Number(trade.proceedsUsdc);
+      if (!Number.isFinite(proceeds)) continue;
+      const fees = Number(trade.feesUsdc) || 0;
+      const cost = openPremiumByContract.get(key) || 0;
+      realizedPnl += proceeds - cost - fees;
+      openPremiumByContract.delete(key);
+    }
+  }
+
+  return realizedPnl;
+}
+
 /* ── Trade row badge ── */
 function ActionBadge({ action }) {
   return (
@@ -536,15 +572,17 @@ export default function InvestmentDashboard({ userName }) {
   }, []);
 
   const holdings = useMemo(() => computeHoldings(trades, currentPrices), [trades, currentPrices]);
+  const optionRealizedPnl = useMemo(() => computeOptionRealizedPnl(trades), [trades]);
 
   const openHoldings = holdings.filter((h) => h.qty > 0).sort((a, b) => b.marketValue - a.marketValue);
 
   const totals = useMemo(() => {
     const marketValue = openHoldings.reduce((s, h) => s + h.marketValue, 0);
     const unrealizedPnl = openHoldings.reduce((s, h) => s + h.unrealizedPnl, 0);
-    const realizedPnl = holdings.reduce((s, h) => s + h.realizedPnl, 0);
+    const equityRealizedPnl = holdings.reduce((s, h) => s + h.realizedPnl, 0);
+    const realizedPnl = equityRealizedPnl + optionRealizedPnl;
     return { marketValue, unrealizedPnl, realizedPnl, totalPnl: unrealizedPnl + realizedPnl };
-  }, [holdings, openHoldings]);
+  }, [holdings, openHoldings, optionRealizedPnl]);
 
   const totalsMyr = useMemo(() => ({
     marketValue: totals.marketValue * usdMyrRate,
