@@ -40,6 +40,8 @@ def _record_trade_for_dashboard(
             "ticker": ticker,
             "action": (action or "").lower(),   # 'buy' | 'sell'
             "assetType": "OPTION",
+            "asset_type": "OPTION",
+            "currency": "USDC",
             "optionType": option_type,
             "strike": strike,
             "expiry": expiry,
@@ -47,6 +49,7 @@ def _record_trade_for_dashboard(
             # collateral_usdc is the actual dollar figure that moved.
             "quantity": 1,
             "price": collateral_usdc,
+            "collateralUsdc": collateral_usdc,
             "fillPrice": fill_price,
             "companyName": ticker,
             "reason": reason or "AI Thetanuts execution",
