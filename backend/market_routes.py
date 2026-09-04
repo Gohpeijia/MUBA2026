@@ -7,6 +7,48 @@ from finnhub_service import get_rich_market_quote, get_company_fundamentals, get
 market_bp = Blueprint('market', __name__)
 
 
+def _configured_usd_myr_rate() -> float:
+    """Stable FX rate for demo deployments (including Anvil forks)."""
+    try:
+        rate = float(os.getenv("USD_MYR_RATE", "4.30"))
+        return rate if rate > 0 else 4.30
+    except (TypeError, ValueError):
+        return 4.30
+
+
+@market_bp.route('/fx/usd-myr', methods=['GET'])
+@require_auth
+def get_usd_myr_rate():
+    """Return the configured USDC/USD -> MYR display conversion rate."""
+    rate = _configured_usd_myr_rate()
+    return jsonify({
+        "success": True,
+        "data": {
+            "base": "USD",
+            "quote": "MYR",
+            "rate": rate,
+            "source": "USD_MYR_RATE",
+        },
+    })
+
+
+@market_bp.route('/quote', methods=['GET'])
+@require_auth
+def get_batch_quotes():
+    """Return current USD prices keyed by ticker for dashboard P&L."""
+    symbols = [
+        symbol.strip().upper()
+        for symbol in request.args.get('symbols', '').split(',')
+        if symbol.strip()
+    ][:25]
+    prices = {}
+    for symbol in symbols:
+        quote = get_rich_market_quote(symbol)
+        if quote and quote.get("price") is not None:
+            prices[symbol] = quote["price"]
+    return jsonify({"success": True, "data": prices})
+
+
 # ── /market/details/<ticker> ──────────────────────────────────────────────────
 # Returns quote + fundamentals + Shariah status in ONE call.
 # Frontend uses this for both apiFetchQuote and apiFetchDetails (no duplicate calls).
