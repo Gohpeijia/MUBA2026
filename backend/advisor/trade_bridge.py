@@ -241,17 +241,37 @@ def _build_buy_proposal(
 
     proposal = {
         "selector":         selector,
-        "symbol":           symbol,
-        "decision":         "BUY",
-        "underlying":       contract_result["underlying"],
-        "option_type":      selector["option_type"],
-        "strike":           selector["strike"],
-        "expiry":           selector["expiry"],
-        "previewed_price":  selector.get("previewed_price"),
-        "quantity":         None,
-        "collateral_usdc":  collateral_usdc,
-        "confidence_pct":   int(confidence * 100),
-        "risk_level":       investment_analysis.get("risk_level", "MEDIUM"),
+
+        # Frontend confirmation card
+        "confirm_selector": {
+            "underlying":       contract_result["underlying"],
+            "option_type":      selector["option_type"],
+            "strike":           selector["strike"],
+            "expiry":           selector["expiry"],
+            "collateral_usdc":  collateral_usdc,
+            "previewed_price":  selector.get("previewed_price"),
+        },
+
+        "symbol":            symbol,
+        "ticker":            f"{symbol}-USD",
+        "action":             "BUY",
+        "decision":           "BUY",
+
+        # Keep both forms for compatibility
+        "confidence":         confidence,
+        "confidence_pct":     int(confidence * 100),
+
+        "underlying":         contract_result["underlying"],
+        "option_type":        selector["option_type"],
+        "strike":             selector["strike"],
+        "expiry":             selector["expiry"],
+        "previewed_price":    selector.get("previewed_price"),
+        "quantity":           None,
+        "collateral_usdc":    collateral_usdc,
+        "proposed_amount_usdc": collateral_usdc,
+        "risk_level":         investment_analysis.get("risk_level", "MEDIUM"),
+        "risk_tolerance":     risk_tolerance,
+
         "wallet_snapshot": {
             "tradable_usdc": tradable_usdc,
             "has_gas":       wallet.get("has_gas"),
@@ -381,18 +401,38 @@ def _build_sell_proposal(
 
     proposal = {
         "selector":         selector,
-        "symbol":           symbol,
-        "decision":         "SELL",
-        "underlying":       underlying,
-        "option_type":      option_type,
-        "strike":           strike,
-        "expiry":           expiry,
-        "previewed_price":  None,
-        "quantity":         quantity,
-        "collateral_usdc":  0.0,
-        "reserve_price":    reserve_price,
-        "confidence_pct":   int(confidence * 100),
-        "risk_level":       investment_analysis.get("risk_level", "MEDIUM"),
+    
+        # Frontend confirmation card
+        "confirm_selector": {
+            "underlying":       underlying,
+            "option_type":      option_type,
+            "strike":            strike,
+            "expiry":            expiry,
+            "collateral_usdc":  0.0,
+            "previewed_price":  None,
+        },
+    
+        "symbol":            symbol,
+        "ticker":             f"{symbol}-USD",
+        "action":             "SELL",
+        "decision":           "SELL",
+    
+        # Keep both forms for compatibility
+        "confidence":         confidence,
+        "confidence_pct":     int(confidence * 100),
+    
+        "underlying":         underlying,
+        "option_type":        option_type,
+        "strike":              strike,
+        "expiry":              expiry,
+        "previewed_price":     None,
+        "quantity":            quantity,
+        "collateral_usdc":     0.0,
+        "proposed_amount_usdc": 0.0,
+        "reserve_price":       reserve_price,
+        "risk_level":          investment_analysis.get("risk_level", "MEDIUM"),
+        "risk_tolerance":      risk_tolerance,
+    
         "wallet_snapshot": {
             "tradable_usdc": wallet.get("tradable_usdc"),
             "has_gas":       wallet.get("has_gas"),
