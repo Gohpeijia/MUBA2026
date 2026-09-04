@@ -17,6 +17,7 @@ def _record_trade_for_dashboard(
     strike=None,
     expiry=None,
     collateral_usdc: float = None,
+    proceeds_usdc: float = None,
     fill_price=None,
     reason: str = "",
 ) -> None:
@@ -50,6 +51,7 @@ def _record_trade_for_dashboard(
             "quantity": 1,
             "price": collateral_usdc,
             "collateralUsdc": collateral_usdc,
+            "proceedsUsdc": proceeds_usdc,
             "fillPrice": fill_price,
             "companyName": ticker,
             "reason": reason or "AI Thetanuts execution",
@@ -265,7 +267,21 @@ def execute_confirmed_sell(proposal: dict, *, action: str = "CONFIRM", user_id: 
     if not verification.get("ok") or not verification.get("closed"):
         return {"ok": False, "status": "FAILED", "tx_hash": tx_hash, "error": "SELL transaction confirmed, but the live position could not be verified as closed.", "transaction": transaction, "verification": verification}
 
-    result = {**close_result, "ok": True, "status": "EXECUTED", "tx_hash": tx_hash, "receipt_confirmed": True, "transaction": transaction, "verification": verification}
+    # USDC gas is not charged on Anvil/Base (gas is ETH), so the wallet's
+    # post-close USDC increase is the actual option closing proceeds.
+    wallet_after = trader.get_wallet_balance()
+    proceeds_usdc = None
+    if wallet_after.get("ok"):
+        proceeds_usdc = max(
+            0.0,
+            round(
+                float(wallet_after.get("usdc", 0.0) or 0.0)
+                - float(wallet.get("usdc", 0.0) or 0.0),
+                6,
+            ),
+        )
+
+    result = {**close_result, "ok": True, "status": "EXECUTED", "tx_hash": tx_hash, "receipt_confirmed": True, "transaction": transaction, "verification": verification, "proceeds_usdc": proceeds_usdc}
     _log_thetanuts_trade({
         "ticker": ticker,
         "decision": "SELL",
@@ -283,6 +299,7 @@ def execute_confirmed_sell(proposal: dict, *, action: str = "CONFIRM", user_id: 
         option_type=option_type,
         strike=strike,
         expiry=expiry,
+        proceeds_usdc=proceeds_usdc,
         reason=f"AI {action}",
     )
     return result
