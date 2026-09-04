@@ -88,7 +88,28 @@ export default function TradeResultCard({ trade, onDismiss }) {
 
   const exec = trade.thetanuts_execution;
   const status = exec?.status;
-  const meta = STATUS_META[status] || { label: 'No trade attempted', color: '#666', bg: '#f0f0f0' };
+  const isPendingProposal = !status;
+  const meta = STATUS_META[status] || (
+    isPendingProposal
+      ? {
+          label: 'Awaiting your confirmation',
+          color: '#a8710a',
+          bg: '#fdf3e0',
+        }
+      : {
+          label: 'No trade attempted',
+          color: '#666',
+          bg: '#f0f0f0',
+        }
+  );
+
+  const confidence =
+  trade.confidence != null
+    ? Number(trade.confidence)
+    : trade.evidence_conviction != null
+      ? Number(trade.evidence_conviction)
+      : null;
+
   // Only show the generic error/reason line for terminal states — the
   // pending/needs-reconfirmation panels below render `reason` themselves
   // as part of their own layout, so this would otherwise duplicate it.
@@ -129,7 +150,9 @@ export default function TradeResultCard({ trade, onDismiss }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontWeight: 700, color: actionColor }}>{trade.action}</span>
           <span style={{ fontWeight: 700 }}>{trade.ticker}</span>
-          <span style={{ color: '#888' }}>· {trade.confidence}% confidence</span>
+          {confidence != null && (
+            <span style={{ color: '#888' }}>· {confidence > 1 ? confidence : confidence * 100}% confidence</span>
+          )}
         </div>
         {onDismiss && (
           <button
@@ -177,7 +200,7 @@ export default function TradeResultCard({ trade, onDismiss }) {
       {/* PENDING_CONFIRMATION — "Suggest actions, I confirm each one" mode.
           Nothing has been sent on-chain yet; Confirm re-checks the book
           fresh on the backend before ever filling. */}
-      {status === 'PENDING_CONFIRMATION' && (
+      {(status === 'PENDING_CONFIRMATION' || isPendingProposal) && (
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: '#8a5c0b', fontSize: 12 }}>
             <FaClock size={11} style={{ marginTop: 2, flexShrink: 0 }} />
