@@ -10,6 +10,9 @@ const API_BASE = 'http://127.0.0.1:5000/api';
 const fmtUSD = (n, opts = {}) =>
   `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, ...opts })}`;
 
+const fmtUSDC = (n) =>
+  `${Math.abs(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
+
 const getGreeting = () => {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
@@ -33,7 +36,11 @@ const fmtRM = (value) =>
   new Intl.NumberFormat("en-MY", {
     style: "currency",
     currency: "MYR",
-  }).format(value);
+  }).format(Math.abs(Number(value) || 0));
+
+const DEFAULT_USD_MYR_RATE = Number(import.meta.env.VITE_USD_MYR_RATE) > 0
+  ? Number(import.meta.env.VITE_USD_MYR_RATE)
+  : 4.30;
 
 // Local-calendar-day key (not UTC) so trades made late at night still land
 // in the day the user actually sees them on.
@@ -97,7 +104,8 @@ function groupTradesByDay(sortedTradeList) {
  * Trade History list below (see isOptionTrade/renderTradeRow), just not
  * folded into these share-holding cards.
  */
-const isOptionTrade = (t) => t.assetType === 'OPTION';
+const isOptionTrade = (t) =>
+  String(t.assetType || t.asset_type || '').toUpperCase() === 'OPTION';
 
 function computeHoldings(trades, currentPrices) {
   const byTicker = {};
@@ -439,6 +447,7 @@ function TradeProposalModal({ proposal, onClose, onSuccess }) {
 export default function InvestmentDashboard({ userName }) {
   const [trades, setTrades] = useState([]);
   const [currentPrices, setCurrentPrices] = useState({});
+  const [usdMyrRate, setUsdMyrRate] = useState(DEFAULT_USD_MYR_RATE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // all | buy | sell
@@ -462,10 +471,21 @@ export default function InvestmentDashboard({ userName }) {
       const tradeList = tradesRes.data.success ? tradesRes.data.data.trades || [] : [];
       setTrades(tradeList);
 
+      try {
+        const fxRes = await axios.get(`${API_BASE}/stocks/market/fx/usd-myr`, { headers });
+        const rate = Number(fxRes.data?.data?.rate);
+        if (fxRes.data?.success && Number.isFinite(rate) && rate > 0) {
+          setUsdMyrRate(rate);
+        }
+      } catch {
+        // Keep the deterministic Vite/default demo rate when the backend is
+        // unavailable. USDC is treated as USD for display conversion only.
+      }
+
       const tickers = [...new Set(tradeList.map((t) => t.ticker))];
       if (tickers.length > 0) {
         try {
-          const quoteRes = await axios.get(`${API_BASE}/stocks/quote`, {
+          const quoteRes = await axios.get(`${API_BASE}/stocks/market/quote`, {
             headers,
             params: { symbols: tickers.join(',') },
           });
@@ -525,6 +545,13 @@ export default function InvestmentDashboard({ userName }) {
     const realizedPnl = holdings.reduce((s, h) => s + h.realizedPnl, 0);
     return { marketValue, unrealizedPnl, realizedPnl, totalPnl: unrealizedPnl + realizedPnl };
   }, [holdings, openHoldings]);
+
+  const totalsMyr = useMemo(() => ({
+    marketValue: totals.marketValue * usdMyrRate,
+    realizedPnl: totals.realizedPnl * usdMyrRate,
+    unrealizedPnl: totals.unrealizedPnl * usdMyrRate,
+    totalPnl: totals.totalPnl * usdMyrRate,
+  }), [totals, usdMyrRate]);
 
   const sortedTrades = useMemo(
     () =>
@@ -659,15 +686,16 @@ export default function InvestmentDashboard({ userName }) {
         {/* Portfolio value + total P&L */}
         <section className="inv-card inv-card--hero">
           <span className="card-label">Portfolio Value</span>
-          <div className="inv-hero-value">{fmtRM(totals.marketValue)}</div>
+          <div className="inv-hero-value">{fmtRM(totalsMyr.marketValue)}</div>
           <div className={`inv-hero-delta ${isTotalUp ? 'inv-up' : 'inv-down'}`}>
             <span>{isTotalUp ? '▲' : '▼'}</span>
-            <span>{isTotalUp ? '+' : '-'}{fmtRM(totals.totalPnl)} total P&L</span>
+            <span>{isTotalUp ? '+' : '-'}{fmtRM(totalsMyr.totalPnl)} total P&L</span>
           </div>
           <div className="inv-pnl-split">
-            <span>Realized: <strong className={totals.realizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.realizedPnl >= 0 ? '+' : '-'}{fmtUSD(totals.realizedPnl)}</strong></span>
-            <span>Unrealized: <strong className={totals.unrealizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.unrealizedPnl >= 0 ? '+' : '-'}{fmtUSD(totals.unrealizedPnl)}</strong></span>
+            <span>Realized: <strong className={totals.realizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.realizedPnl >= 0 ? '+' : '-'}{fmtUSDC(totals.realizedPnl)} ({fmtRM(totalsMyr.realizedPnl)})</strong></span>
+            <span>Unrealized: <strong className={totals.unrealizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.unrealizedPnl >= 0 ? '+' : '-'}{fmtUSDC(totals.unrealizedPnl)} ({fmtRM(totalsMyr.unrealizedPnl)})</strong></span>
           </div>
+          <span className="inv-card-sub">Demo FX: 1 USDC = {usdMyrRate.toFixed(4)} MYR</span>
         </section>
 
         {/* Current holdings */}
