@@ -158,6 +158,10 @@ export function AIAdvisorProvider({ children }) {
           ...prev,
           thetanuts_execution: data.data.execution,
         }));
+        const finalStatus = data.data.execution?.status || data.data.status;
+        if (['EXECUTED', 'DRY_RUN_OK', 'PAPER_EXECUTED'].includes(finalStatus)) {
+          window.dispatchEvent(new CustomEvent('wallet:refresh'));
+        }
       }
     } catch (error) {
       console.error('Confirm Trade Error:', error);
@@ -191,7 +195,7 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
   setLoading(true);
   try {
     const user = auth.currentUser;
-    if (!user) throw new Error("Sila log masuk terlebih dahulu. (Please log in)");
+    if (!user) throw new Error("Please log in first.");
 
     const token = await user.getIdToken();
 

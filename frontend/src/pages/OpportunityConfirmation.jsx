@@ -114,6 +114,9 @@ export default function OpportunityConfirmation() {
         confirmation?.terms_hash,
       );
       setConfirmation(data.confirmation);
+      if (['EXECUTED', 'DRY_RUN_OK', 'PAPER_EXECUTED'].includes(data.confirmation?.status)) {
+        window.dispatchEvent(new CustomEvent('wallet:refresh'));
+      }
     } catch (err) {
       setError(err.data?.error || err.message || 'Could not confirm opportunity.');
       if (err.data?.confirmation) setConfirmation(err.data.confirmation);

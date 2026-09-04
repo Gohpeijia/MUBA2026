@@ -3,7 +3,7 @@
 # BUG DIPERBAIKI:
 #   BUG 1 — Swarm dijalankan dengan "MARKET" + data kosong walaupun tiada ticker
 #            → Penyelesaian: skip swarm terus jika tiada ticker
-#   BUG 2 — Data harga & sentimen tidak dihantar ke swarm sebelum agen buat keputusan
+#   BUG 2 - Price and sentiment data were not sent to the swarm before agent decisions.
 #            → Penyelesaian: ambil data kuantitatif dulu, hantar ke execute_rehearsal
 
 import os
@@ -59,8 +59,8 @@ FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 
 def get_sentiment_data(ticker: str) -> dict:
     """
-    Ambil skor sentimen sosial dari Finnhub.
-    Mengembalikan buzz, news_score, social_score atau None jika gagal.
+    Fetch social sentiment score from Finnhub.
+    Returns buzz, news_score, social_score, or None if fetching fails.
     """
     try:
         url  = f"https://finnhub.io/api/v1/stock/social-sentiment?symbol={ticker}&token={FINNHUB_KEY}"
@@ -82,7 +82,7 @@ def get_sentiment_data(ticker: str) -> dict:
             "social_score": avg_score,
         }
     except Exception as e:
-        print(f"⚠️ Sentiment fetch gagal [{ticker}]: {e}")
+        print(f"⚠️ Sentiment fetch failed [{ticker}]: {e}")
         return None
 
 
@@ -383,6 +383,6 @@ class AIAgent:
 
         return {
             "status":        "ERROR",
-            "final_advice":  "Saya sedang mengalami gangguan rangkaian. Sila cuba sebentar lagi.",
+            "final_advice":  "I am experiencing a network issue. Please try again shortly.",
             "error_details": errors,
         }

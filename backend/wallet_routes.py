@@ -9,8 +9,9 @@
 #   from wallet_routes import wallet_bp
 #   app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
 from security import require_auth
+from services.portfolio_service import get_paper_cash_balance
 from thetanuts_trader import ThetanutsTrader
 
 wallet_bp = Blueprint('wallet', __name__)
@@ -29,7 +30,16 @@ def get_wallet_balance():
     data.ok telling the frontend whether the numbers are real. This
     lets the UI show "wallet unreachable" instead of a broken request.
     """
-    balance = trader.get_wallet_balance()
+    chain_balance = trader.get_wallet_balance()
+    paper_cash = get_paper_cash_balance(g.uid)
+    balance = {
+        **chain_balance,
+        "paper_cash_usd": paper_cash,
+        "tradable_usdc": paper_cash,
+        "usdc": paper_cash,
+        "balance_source": "PAPER_EQUITY",
+        "chain_wallet": chain_balance,
+    }
     return jsonify({"success": True, "data": balance})
 
 

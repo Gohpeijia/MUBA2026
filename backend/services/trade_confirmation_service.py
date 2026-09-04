@@ -236,6 +236,44 @@ def get_confirmation(user_id: str, confirmation_id: str) -> dict:
     return {"success": True, "confirmation": public_confirmation(snap.to_dict() or {}), "http_status": 200}
 
 
+def list_active_confirmations(user_id: str) -> dict:
+    confirmations = []
+    now = datetime.now(timezone.utc)
+
+    try:
+        docs = _confirmations_collection(user_id).stream()
+        for snap in docs:
+            data = snap.to_dict() or {}
+            if data.get("status") not in ACTIVE_CONFIRM_STATUSES:
+                continue
+
+            expires_at = parse_dt(data.get("expires_at"))
+            if expires_at and now >= expires_at:
+                continue
+
+            confirmations.append(public_confirmation(data))
+
+        confirmations.sort(
+            key=lambda item: item.get("created_at") or "",
+            reverse=True,
+        )
+
+        return {
+            "success": True,
+            "confirmations": confirmations,
+            "http_status": 200,
+        }
+
+    except Exception:
+        logger.exception("Failed to list active confirmations for user %s", user_id)
+        return {
+            "success": False,
+            "error": "Failed to load pending confirmations.",
+            "confirmations": [],
+            "http_status": 500,
+        }
+
+
 def reject_confirmation(user_id: str, confirmation_id: str) -> dict:
     ref = confirmation_ref(user_id, confirmation_id)
     transaction = db.transaction()

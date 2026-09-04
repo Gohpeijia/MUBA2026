@@ -7,6 +7,8 @@ from firebase_config import db
 from Risk_sizing import calculate_position_size, check_risk_limits
 from services.execution_router import PAPER_EQUITY
 from services.portfolio_service import (
+    adjust_paper_cash,
+    get_paper_cash_balance,
     get_portfolio_state,
     normalize_symbol,
     sync_portfolio_summary,
@@ -257,6 +259,16 @@ def execute_equity_buy(user_id: str, proposal: dict, *, action: str = "CONFIRM")
     if not ok:
         return {"ok": False, "status": "FAILED", "error": f"Trade rejected by risk management: {reason}", "risk_sizing": risk}
 
+    estimated_value = round(shares * price, 2)
+    paper_cash = get_paper_cash_balance(user_id)
+    if estimated_value > paper_cash:
+        return {
+            "ok": False,
+            "status": "FAILED",
+            "error": f"Insufficient paper cash. Need ${estimated_value:.2f}, available ${paper_cash:.2f}.",
+            "paper_cash_usd": paper_cash,
+        }
+
     portfolio = user_data.get("portfolio", [])
     if not isinstance(portfolio, list):
         portfolio = []
@@ -293,6 +305,7 @@ def execute_equity_buy(user_id: str, proposal: dict, *, action: str = "CONFIRM")
         })
 
     user_ref.update({"portfolio": portfolio})
+    paper_cash = adjust_paper_cash(user_id, -estimated_value)
     _record_paper_trade(user_id, proposal, "buy", shares, price)
     sync_portfolio_summary(user_id)
 
@@ -304,7 +317,8 @@ def execute_equity_buy(user_id: str, proposal: dict, *, action: str = "CONFIRM")
         "symbol": symbol,
         "shares": shares,
         "price": price,
-        "estimated_value": round(shares * price, 2),
+        "estimated_value": estimated_value,
+        "paper_cash_usd": paper_cash,
         "dry_run": True,
         "message": "Paper equity BUY recorded. No broker or blockchain transaction was sent.",
     }
@@ -351,7 +365,10 @@ def execute_equity_sell(user_id: str, proposal: dict, *, action: str = "CONFIRM"
             "quantity": remaining,
         })
 
+    estimated_value = round(shares * price, 2)
+
     user_ref.update({"portfolio": portfolio})
+    paper_cash = adjust_paper_cash(user_id, estimated_value)
     _record_paper_trade(user_id, proposal, "sell", shares, price)
     sync_portfolio_summary(user_id)
 
@@ -363,7 +380,8 @@ def execute_equity_sell(user_id: str, proposal: dict, *, action: str = "CONFIRM"
         "symbol": symbol,
         "shares": shares,
         "price": price,
-        "estimated_value": round(shares * price, 2),
+        "estimated_value": estimated_value,
+        "paper_cash_usd": paper_cash,
         "dry_run": True,
         "message": "Paper equity SELL recorded. No broker or blockchain transaction was sent.",
     }

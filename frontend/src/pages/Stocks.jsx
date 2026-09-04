@@ -80,7 +80,7 @@ async function apiFetchStockData(ticker) {
   };
 
   const details = {
-    statusSyariah: d.isHalal !== undefined ? (d.isHalal ? 'Patuh Syariah ✅' : 'Tidak Patuh Syariah ❌') : '—',
+    shariahStatus: d.isHalal !== undefined ? (d.isHalal ? 'Shariah Compliant ✅' : 'Not Shariah Compliant ❌') : '—',
     sector:        d.sector || '—',
     industry:      d.industry || '—',
     marketCap:     d.marketCap ? `$${(d.marketCap / 1000).toFixed(2)}B` : '—',
@@ -88,7 +88,7 @@ async function apiFetchStockData(ticker) {
     eps:           d.eps !== undefined && d.eps !== null ? d.eps.toFixed(2) : '—',
     beta:          d.beta !== undefined && d.beta !== null ? d.beta.toFixed(2) : '—',
     
-    // 1. ADDED BACK: Hasil Dividen (%)
+    // 1. ADDED BACK: Dividend Yield (%)
     dividendYield: d.dividendYield !== undefined && d.dividendYield !== null ? `${Number(d.dividendYield).toFixed(2)}%` : '—',
     
     // 2. FIXED: Checking for undefined/null so $0 dividends and 0 metrics still display correctly
@@ -234,7 +234,7 @@ export default function Stocks() {
       .catch(err => {
         if (cancelled) return;
         console.error('data error:', err);
-        setErrorMsg(`Fail to get data for ${activeTicker}. Check sticker and try again`);
+        setErrorMsg(`Failed to get data for ${activeTicker}. Check the ticker and try again.`);
       })
       .finally(() => {
         if (!cancelled) {

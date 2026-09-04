@@ -8,7 +8,12 @@ from finnhub_service import (
     get_historical_candles,
 )
 from Risk_sizing import calculate_position_size, check_risk_limits
-from services.portfolio_service import normalize_symbol, sync_portfolio_summary
+from services.portfolio_service import (
+    adjust_paper_cash,
+    get_paper_cash_balance,
+    normalize_symbol,
+    sync_portfolio_summary,
+)
 import os
 import time
 import requests
@@ -33,6 +38,8 @@ def _record_trade(user_id: str, ticker: str, action: str, quantity: float,
         "quantity":    quantity,
         "price":       price,
         "companyName": company_name,
+        "assetType":   "EQUITY",
+        "asset_type":  "EQUITY",
         "reason":      reason,
         "timestamp":   datetime.now().isoformat(),
     })
@@ -315,6 +322,9 @@ def buy_stock():
             total_portfolio_value = float(portfolio_state.get('total_value', 0.0) or 0.0)
 
         if total_portfolio_value <= 0:
+            total_portfolio_value = get_paper_cash_balance(secure_user_id)
+
+        if total_portfolio_value <= 0:
             return jsonify({
                 "success": False,
                 "error": "Portfolio value is required for risk management.",
@@ -367,6 +377,16 @@ def buy_stock():
                 "risk_sizing": proposal_for_gate,
             }), 403
 
+        trade_value = round(proposed_value, 2)
+        paper_cash = get_paper_cash_balance(secure_user_id)
+        if trade_value > paper_cash:
+            return jsonify({
+                "success": False,
+                "error": f"Insufficient paper cash. Need ${trade_value:.2f}, available ${paper_cash:.2f}.",
+                "paperCashUsd": paper_cash,
+                "risk_sizing": proposal_for_gate,
+            }), 403
+
         stock_found = False
 
         for item in portfolio:
@@ -414,6 +434,7 @@ def buy_stock():
             update_payload["totalPortfolioValue"] = total_portfolio_value
 
         user_ref.update(update_payload)
+        paper_cash = adjust_paper_cash(secure_user_id, -trade_value)
         sync_portfolio_summary(secure_user_id)
 
         _record_trade(
@@ -430,6 +451,7 @@ def buy_stock():
             "success": True,
             "message": f"Successfully updated portfolio for {sticker}!",
             "risk_sizing": proposal_for_gate,
+            "paperCashUsd": paper_cash,
         })
 
     except Exception as e:
@@ -511,7 +533,9 @@ def sell_stock():
                 )
             ]
 
+        trade_value = round(shares * price, 2)
         user_ref.update({"portfolio": portfolio})
+        paper_cash = adjust_paper_cash(secure_user_id, trade_value)
         sync_portfolio_summary(secure_user_id)
 
         _record_trade(
@@ -524,7 +548,11 @@ def sell_stock():
             reason=reason,
         )
 
-        return jsonify({"success": True, "message": f"Successfully sold {shares} share(s) of {sticker}!"})
+        return jsonify({
+            "success": True,
+            "message": f"Successfully sold {shares} share(s) of {sticker}!",
+            "paperCashUsd": paper_cash,
+        })
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

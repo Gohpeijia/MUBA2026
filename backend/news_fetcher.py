@@ -1,5 +1,5 @@
 # pengambil_data_saham.py
-# Ambil harga, asas kewangan, dan sentimen SEBELUM agen AI buat keputusan.
+# Fetch price, fundamentals, and sentiment before the AI agents make a decision.
 # Menggunakan yfinance (percuma, tiada API key diperlukan).
 #
 # Pasang: pip install yfinance httpx
@@ -49,7 +49,7 @@ PETA_TICKER_FINNHUB = {
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BAHAGIAN 1 — Ambil harga & asas kewangan (yfinance)
+# SECTION 1 - Fetch price and financial fundamentals (yfinance)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _adalah_simbol_lengkap(ticker: str) -> bool:
@@ -57,14 +57,14 @@ def _adalah_simbol_lengkap(ticker: str) -> bool:
 
 def ambil_data_harga_dan_asas(ticker: str) -> dict:
     """
-    Ambil data harga semasa dan asas kewangan dari Yahoo Finance.
-    Tiada API key diperlukan.
+    Fetch current price data and financial fundamentals from Yahoo Finance.
+    No API key required.
 
-    Data yang diambil:
-    - Harga semasa, perubahan %, volum
-    - P/E ratio, nisbah hutang, pulangan ekuiti (ROE)
-    - Harga 52 minggu (tinggi/rendah)
-    - Purata bergerak 50 hari & 200 hari
+    Data fetched:
+    - Current price, percent change, volume
+    - P/E ratio, debt ratio, return on equity (ROE)
+    - 52-week high/low
+    - 50-day and 200-day moving averages
     """
     ticker_bersih = ticker.upper().replace(".KL", "")
     if ticker_bersih in ("ETH", "BTC", "ETH-USD", "BTC-USD") or "-USD" in ticker_bersih:
@@ -77,9 +77,9 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
         maklumat = saham.info
 
         if not maklumat or maklumat.get("regularMarketPrice") is None:
-            return _data_kosong(ticker, "Yahoo Finance tidak mengembalikan data.")
+            return _data_kosong(ticker, "Yahoo Finance did not return data.")
 
-        # ── Harga ──────────────────────────────────────────────────────────
+        # Price.
         harga_semasa   = maklumat.get("regularMarketPrice",         None)
         harga_buka     = maklumat.get("regularMarketOpen",          None)
         harga_tutup    = maklumat.get("previousClose",              None)
@@ -90,10 +90,10 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
         ma_50          = maklumat.get("fiftyDayAverage",            None)
         ma_200         = maklumat.get("twoHundredDayAverage",       None)
 
-        # ── Asas Kewangan ──────────────────────────────────────────────────
+        # Financial fundamentals.
         nisbah_pe         = maklumat.get("trailingPE",            None)
         nisbah_pb         = maklumat.get("priceToBook",           None)
-        nisbah_hutang     = maklumat.get("debtToEquity",          None)  # dalam %
+        nisbah_hutang     = maklumat.get("debtToEquity",          None)  # percent
         pulangan_ekuiti   = maklumat.get("returnOnEquity",        None)
         margin_keuntungan = maklumat.get("profitMargins",         None)
         perolehan_sesaham = maklumat.get("trailingEps",           None)
@@ -101,20 +101,20 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
         permodalan_pasaran= maklumat.get("marketCap",             None)
         hasil_semasa      = maklumat.get("totalRevenue",          None)
 
-        # ── Keputusan Teknikal (berdasarkan purata bergerak) ────────────────
+        # Technical signal based on moving averages.
         isyarat_teknikal = "Neutral ⏸️"
         if harga_semasa and ma_50 and ma_200:
             if harga_semasa > ma_50 > ma_200:
-                isyarat_teknikal = "Naik (Bullish) 📈"
+                isyarat_teknikal = "Bullish 📈"
             elif harga_semasa < ma_50 < ma_200:
-                isyarat_teknikal = "Turun (Bearish) 📉"
+                isyarat_teknikal = "Bearish 📉"
             elif harga_semasa > ma_50:
-                isyarat_teknikal = "Sedikit Positif 📈"
+                isyarat_teknikal = "Slightly Positive 📈"
             else:
-                isyarat_teknikal = "Sedikit Negatif 📉"
+                isyarat_teknikal = "Slightly Negative 📉"
 
-        # ── Nisbah Hutang untuk Semakan Syariah ────────────────────────────
-        # Tukar nisbah_hutang dari % ke perpuluhan (33% ambang Syariah = 0.33)
+        # Debt ratio for Shariah screening.
+        # Convert nisbah_hutang from percent to decimal (33% Shariah threshold = 0.33).
         nisbah_hutang_syariah = None
         if nisbah_hutang is not None:
             nisbah_hutang_syariah = round(nisbah_hutang / 100, 4)
@@ -154,7 +154,7 @@ def ambil_data_harga_dan_asas(ticker: str) -> dict:
 
 
 def _data_kosong(ticker: str, sebab: str) -> dict:
-    """Kembalikan struktur data kosong jika gagal."""
+    """Return an empty data structure when fetching fails."""
     return {
         "ticker":           ticker,
         "berjaya":          False,
@@ -166,7 +166,7 @@ def _data_kosong(ticker: str, sebab: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BAHAGIAN 2 — Ambil sentimen berita (Finnhub)
+# SECTION 2 - Fetch news sentiment (Finnhub)
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def ambil_sentimen_berita(ticker: str) -> dict:
@@ -174,15 +174,15 @@ async def ambil_sentimen_berita(ticker: str) -> dict:
     if _adalah_simbol_lengkap(ticker):
         return {
         "berjaya": False,
-        "sebab":   "Sentimen berita syarikat tidak berkenaan untuk crypto.",
+        "sebab":   "Company news sentiment does not apply to crypto.",
         "skor":    0.5,
         "label":   "Neutral ⏸️",
         "isyarat": "HOLD",
         }
     
     """
-    Ambil skor sentimen berita dari Finnhub.
-    Mengembalikan skor 0.0–1.0 dan label Melayu.
+    Fetch news sentiment score from Finnhub.
+    Returns a 0.0-1.0 score and an English label.
     """
     ticker_bersih = ticker.upper().replace(".KL", "")
     if ticker_bersih in ("ETH", "BTC", "ETH-USD", "BTC-USD") or "-USD" in ticker_bersih:
@@ -282,17 +282,17 @@ async def bina_data_kuantitatif(
         "purata_bergerak_200":  harga.get("ma_200"),
         "isyarat_teknikal":     harga.get("isyarat_teknikal", "Neutral ⏸️"),
 
-        # ── Data asas kewangan (untuk FUNDAMENTALS_AGENT, VALUE_SNIPER) ─────
+        # Core financial data for FUNDAMENTALS_AGENT and VALUE_SNIPER.
         "nisbah_pe":            asas.get("nisbah_pe"),
         "nisbah_pb":            asas.get("nisbah_pb"),
-        "nisbah_hutang":        asas.get("nisbah_hutang"),       # untuk semak Syariah
+        "nisbah_hutang":        asas.get("nisbah_hutang"),       # for Shariah screening
         "pulangan_ekuiti":      asas.get("pulangan_ekuiti"),
         "margin_keuntungan":    asas.get("margin_keuntungan"),
         "perolehan_sesaham":    asas.get("perolehan_sesaham"),
         "dividen_hasil":        asas.get("dividen_hasil"),
         "permodalan_pasaran":   asas.get("permodalan_pasaran"),
 
-        # ── Data sentimen berita (untuk SENTIMENT_AGENT) ─────────────────────
+        # News sentiment data for SENTIMENT_AGENT.
         "skor_sentimen":        data_sentimen.get("skor", 0.5),
         "label_sentimen":       data_sentimen.get("label", "Neutral ⏸️"),
         "isyarat_sentimen":     data_sentimen.get("isyarat", "HOLD"),
@@ -323,25 +323,25 @@ def format_data_untuk_prompt(quant: dict) -> str:
     arah     = "▲" if (perubahan or 0) > 0 else "▼"
 
     return f"""
-📊 DATA PASARAN TERKINI ({quant.get('ticker', '')}):
+📊 LATEST MARKET DATA ({quant.get('ticker', '')}):
 
-💹 Harga & Teknikal:
-  • Harga Semasa    : {fmt(harga, " sen")}  {arah} {fmt(perubahan, "%")}
-  • 52 Minggu Tinggi: {fmt(quant.get('tinggi_52_minggu'), " sen")}
-  • 52 Minggu Rendah: {fmt(quant.get('rendah_52_minggu'), " sen")}
-  • MA 50 Hari      : {fmt(quant.get('purata_bergerak_50'), " sen")}
-  • MA 200 Hari     : {fmt(quant.get('purata_bergerak_200'), " sen")}
-  • Isyarat Teknikal: {quant.get('isyarat_teknikal', 'Neutral ⏸️')}
+💹 Price & Technicals:
+  • Current Price   : {fmt(harga)}  {arah} {fmt(perubahan, "%")}
+  • 52-Week High    : {fmt(quant.get('tinggi_52_minggu'))}
+  • 52-Week Low     : {fmt(quant.get('rendah_52_minggu'))}
+  • 50-Day MA       : {fmt(quant.get('purata_bergerak_50'))}
+  • 200-Day MA      : {fmt(quant.get('purata_bergerak_200'))}
+  • Technical Signal: {quant.get('isyarat_teknikal', 'Neutral ⏸️')}
 
-📋 Asas Kewangan:
-  • Nisbah P/E      : {fmt(quant.get('nisbah_pe'), "x")}
-  • Nisbah P/B      : {fmt(quant.get('nisbah_pb'), "x")}
-  • Hutang/Ekuiti   : {fmt(quant.get('nisbah_hutang'), " (had Syariah: 0.33)")}
-  • Pulangan Ekuiti : {fmt(quant.get('pulangan_ekuiti'), "%")}
-  • Margin Untung   : {fmt(quant.get('margin_keuntungan'), "%")}
-  • Hasil Dividen   : {fmt(quant.get('dividen_hasil'), "%")}
+📋 Financial Fundamentals:
+  • P/E Ratio       : {fmt(quant.get('nisbah_pe'), "x")}
+  • P/B Ratio       : {fmt(quant.get('nisbah_pb'), "x")}
+  • Debt/Equity     : {fmt(quant.get('nisbah_hutang'), " (Shariah limit: 0.33)")}
+  • Return on Equity: {fmt(quant.get('pulangan_ekuiti'), "%")}
+  • Profit Margin   : {fmt(quant.get('margin_keuntungan'), "%")}
+  • Dividend Yield  : {fmt(quant.get('dividen_hasil'), "%")}
 
-💬 Sentimen Berita:
-  • Skor Sentimen   : {fmt(quant.get('skor_sentimen'))} → {quant.get('label_sentimen', 'Neutral')}
-  • Bil. Artikel    : {fmt(quant.get('bilangan_artikel_berita'), " artikel (7 hari lepas)")}
+💬 News Sentiment:
+  • Sentiment Score : {fmt(quant.get('skor_sentimen'))} → {quant.get('label_sentimen', 'Neutral')}
+  • Article Count   : {fmt(quant.get('bilangan_artikel_berita'), " articles (last 7 days)")}
 """

@@ -1,10 +1,14 @@
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
+from firebase_admin import firestore
 from firebase_config import db
 
 logger = logging.getLogger(__name__)
+DEFAULT_PAPER_CASH_USD = float(os.getenv("PAPER_CASH_USD", "10000"))
+PAPER_CASH_VERSION = 1
 
 
 EMPTY_PORTFOLIO_STATE = {
@@ -215,6 +219,65 @@ def get_positions(user_id: str) -> dict:
 
 def get_total_portfolio_value(user_id: str) -> float:
     return _to_float(get_portfolio_state(user_id).get("total_value"))
+
+
+def _paper_cash_from_trades(user_id: str) -> float:
+    cash = DEFAULT_PAPER_CASH_USD
+    try:
+        trades = db.collection("users").document(user_id).collection("trades").stream()
+        for trade in trades:
+            data = trade.to_dict() or {}
+            asset_type = str(data.get("assetType") or data.get("asset_type") or "EQUITY").upper()
+            if asset_type != "EQUITY":
+                continue
+
+            quantity = _to_float(data.get("quantity"))
+            price = _to_float(data.get("price"))
+            value = quantity * price
+            action = str(data.get("action") or "").lower()
+
+            if action == "buy":
+                cash -= value
+            elif action == "sell":
+                cash += value
+    except Exception:
+        logger.exception("Failed to derive paper cash from trades for user %s", user_id)
+
+    return round(cash, 2)
+
+
+def get_paper_cash_balance(user_id: str) -> float:
+    user_ref = db.collection("users").document(user_id)
+    snap = user_ref.get()
+    data = snap.to_dict() if snap.exists else {}
+
+    if (
+        isinstance(data, dict)
+        and data.get("paperCashUsd") is not None
+        and data.get("paperCashVersion") == PAPER_CASH_VERSION
+    ):
+        return round(_to_float(data.get("paperCashUsd"), DEFAULT_PAPER_CASH_USD), 2)
+
+    cash = _paper_cash_from_trades(user_id)
+    user_ref.set({
+        "paperCashUsd": cash,
+        "paperCashVersion": PAPER_CASH_VERSION,
+    }, merge=True)
+    return cash
+
+
+def adjust_paper_cash(user_id: str, delta: float) -> float:
+    user_ref = db.collection("users").document(user_id)
+    get_paper_cash_balance(user_id)
+
+    user_ref.update({
+        "paperCashUsd": firestore.Increment(round(delta, 2)),
+        "paperCashVersion": PAPER_CASH_VERSION,
+    })
+
+    snap = user_ref.get()
+    data = snap.to_dict() if snap.exists else {}
+    return round(_to_float(data.get("paperCashUsd"), DEFAULT_PAPER_CASH_USD), 2)
 
 
 def user_holds_symbol(portfolio: dict, symbol: str) -> bool:

@@ -51,7 +51,7 @@ def _extract_quantity(position) -> float:
     """Extract a numeric quantity from a portfolio position."""
 
     if isinstance(position, dict):
-        qty = position.get("quantity", position.get("qty"))
+        qty = position.get("quantity", position.get("shares", position.get("qty")))
     else:
         qty = position
 
@@ -87,13 +87,7 @@ def _get_held_symbols() -> dict:
         user_id = user_doc.id
 
         try:
-            summary_doc = (
-                db.collection("users")
-                .document(user_id)
-                .collection("portfolio")
-                .document("summary")
-                .get()
-            )
+            portfolio_state = get_portfolio_state(user_id)
         except Exception:
             logger.exception(
                 "Failed to load portfolio for user %s",
@@ -101,11 +95,7 @@ def _get_held_symbols() -> dict:
             )
             continue
 
-        if not summary_doc.exists:
-            continue
-
-        data = summary_doc.to_dict() or {}
-        positions = data.get("positions", {})
+        positions = portfolio_state.get("positions", {})
 
         if not isinstance(positions, dict):
             continue

@@ -12,18 +12,18 @@ import React, { memo } from 'react';
  *  loading: bool
  */
 const FIELDS = [
-  { key: 'sector',          label: 'Sektor' },
-  { key: 'industry',        label: 'Industri' },
-  { key: 'marketCap',       label: 'Modal Pasaran (Juta)' },
-  { key: 'peRatio',         label: 'Nisbah PE' },
-  { key: 'dividendYield',   label: 'Hasil Dividen (%)' },
-  { key: 'dividendRate',        label: 'Dividen ($)' },
+  { key: 'sector',          label: 'Sector' },
+  { key: 'industry',        label: 'Industry' },
+  { key: 'marketCap',       label: 'Market Cap (Million)' },
+  { key: 'peRatio',         label: 'PE Ratio' },
+  { key: 'dividendYield',   label: 'Dividend Yield (%)' },
+  { key: 'dividendRate',    label: 'Dividend ($)' },
   { key: 'eps',             label: 'EPS' },
   { key: 'beta',            label: 'Beta' },
-  { key: 'avgVolume',       label: 'Purata Volum' },
-  { key: 'fiftyTwoWeekHigh',label: 'Tinggi 52M' },
-  { key: 'fiftyTwoWeekLow', label: 'Rendah 52M' },
-  { key: 'lotSize',         label: 'Saiz Lot' },
+  { key: 'avgVolume',       label: 'Average Volume' },
+  { key: 'fiftyTwoWeekHigh',label: '52W High' },
+  { key: 'fiftyTwoWeekLow', label: '52W Low' },
+  { key: 'lotSize',         label: 'Lot Size' },
 ];
 
 const StockDetails = memo(function StockDetails({ details, loading }) {

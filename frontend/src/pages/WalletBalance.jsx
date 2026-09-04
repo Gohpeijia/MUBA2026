@@ -7,16 +7,14 @@ const API_BASE = 'http://localhost:5000/api/wallet';
 const REFRESH_INTERVAL_MS = 30000;
 
 /**
- * WalletBalance — shows the AI trader's real, live spendable capital.
+ * WalletBalance — shows the AI trader's spendable paper cash for equities.
  *
  * variant="pill"  → compact, for the NavBar (icon + tradable USDC only)
  * variant="card"  → fuller detail, for the Dashboard or AI Advisor panel
  *                   (tradable + total USDC + ETH gas + a no-funds notice)
  *
- * Reads from GET /api/wallet/balance, which wraps
- * ThetanutsTrader.get_wallet_balance() — the exact same call the AI
- * agent makes before sizing a trade, so what's on screen always matches
- * what the AI is reasoning about.
+ * Reads from GET /api/wallet/balance. The backend keeps the on-chain
+ * wallet snapshot too, but the headline balance is the paper equity fund.
  */
 export default function WalletBalance({ variant = 'pill' }) {
   const [balance, setBalance] = useState(null);
@@ -112,23 +110,25 @@ export default function WalletBalance({ variant = 'pill' }) {
                 <span className="wallet-balance__unit"> USDC</span>
               </span>
               {variant === 'card' && (
-                <span className="wallet-balance__label">tradable</span>
+                <span className="wallet-balance__label">paper cash</span>
               )}
             </div>
 
             {variant === 'card' && (
               <div className="wallet-balance__meta">
-                <span>{balance.usdc.toFixed(2)} USDC total</span>
-                <span className="wallet-balance__dot">·</span>
-                <span>{balance.eth.toFixed(5)} ETH gas</span>
+                <span>{balance.usdc.toFixed(2)} USDC fake fund</span>
+                {balance.chain_wallet && (
+                  <>
+                    <span className="wallet-balance__dot">·</span>
+                    <span>{Number(balance.chain_wallet.eth || 0).toFixed(5)} ETH gas</span>
+                  </>
+                )}
               </div>
             )}
 
             {variant === 'card' && noTradableFunds && (
               <div className="wallet-balance__notice">
-                {balance.has_gas
-                  ? "No tradable USDC yet — the agent will size every trade to 0 until it's funded."
-                  : 'No ETH for gas — fund the wallet before the agent can execute anything.'}
+                No paper cash available. Stock paper trades will be blocked until the fake fund is topped up.
               </div>
             )}
           </>

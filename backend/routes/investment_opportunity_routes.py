@@ -28,6 +28,7 @@ Flow:
 
 import threading
 import logging
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, g
 
@@ -45,6 +46,7 @@ from services.opportunity_prepare_service import prepare_opportunity_for_user
 from services.portfolio_service import get_portfolio_state, user_holds_symbol
 from services.trade_confirmation_service import (
     get_confirmation,
+    list_active_confirmations,
     confirm_confirmation,
     reject_confirmation,
 )
@@ -60,6 +62,27 @@ opportunities_bp = Blueprint(
     __name__,
     url_prefix="/api/opportunities",
 )
+
+_SCAN_STATUS = {
+    "status": "IDLE",
+    "started_at": None,
+    "completed_at": None,
+    "buy_opportunities": 0,
+    "sell_opportunities": 0,
+    "error": None,
+}
+_SCAN_STATUS_LOCK = threading.Lock()
+
+
+def _update_scan_status(**updates):
+    with _SCAN_STATUS_LOCK:
+        _SCAN_STATUS.update(updates)
+        return dict(_SCAN_STATUS)
+
+
+def _current_scan_status():
+    with _SCAN_STATUS_LOCK:
+        return dict(_SCAN_STATUS)
 
 
 
@@ -343,6 +366,10 @@ def trigger_scan():
     """
 
     def run_scan_async():
+        buy_count = 0
+        sell_count = 0
+        failed = False
+
         try:
             logger.info("Starting manual opportunity scan (BUY)...")
 
@@ -350,16 +377,24 @@ def trigger_scan():
 
             if isinstance(buy_result, dict):
                 if buy_result.get("status") == "SCAN_ALREADY_IN_PROGRESS":
+                    failed = True
+                    _update_scan_status(
+                        status="RUNNING",
+                        error="Another scan is already running.",
+                    )
                     logger.info(
                         "Manual BUY scan skipped: another scan is already running."
                     )
                 else:
+                    buy_count = len(buy_result.get("opportunities", []))
                     logger.info(
                         "Manual BUY scan completed: %d opportunities found.",
-                        len(buy_result.get("opportunities", [])),
+                        buy_count,
                     )
 
-        except Exception:
+        except Exception as exc:
+            failed = True
+            _update_scan_status(status="FAILED", error=str(exc))
             logger.exception("BUY opportunity scan failed.")
 
         try:
@@ -369,17 +404,50 @@ def trigger_scan():
 
             if isinstance(sell_result, dict):
                 if sell_result.get("status") == "SCAN_ALREADY_IN_PROGRESS":
+                    failed = True
                     logger.info(
                         "Manual SELL scan skipped: another scan is already running."
                     )
                 else:
+                    sell_count = len(sell_result.get("opportunities", []))
                     logger.info(
                         "Manual SELL scan completed: %d opportunities found.",
-                        len(sell_result.get("opportunities", [])),
+                        sell_count,
                     )
 
-        except Exception:
+        except Exception as exc:
+            failed = True
+            _update_scan_status(status="FAILED", error=str(exc))
             logger.exception("SELL opportunity scan failed.")
+
+        if failed:
+            _update_scan_status(
+                status="FAILED",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                buy_opportunities=buy_count,
+                sell_opportunities=sell_count,
+            )
+        else:
+            _update_scan_status(
+                status="COMPLETED",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                buy_opportunities=buy_count,
+                sell_opportunities=sell_count,
+                error=None,
+            )
+
+    current = _current_scan_status()
+    if current.get("status") == "RUNNING":
+        return jsonify(current), 409
+
+    _update_scan_status(
+        status="RUNNING",
+        started_at=datetime.now(timezone.utc).isoformat(),
+        completed_at=None,
+        buy_opportunities=0,
+        sell_opportunities=0,
+        error=None,
+    )
 
     thread = threading.Thread(
         target=run_scan_async,
@@ -392,6 +460,12 @@ def trigger_scan():
     return jsonify({
         "status": "SCAN_STARTED"
     }), 202
+
+
+@opportunities_bp.route("/scan/status", methods=["GET"])
+@require_auth
+def get_scan_status():
+    return jsonify(_current_scan_status()), 200
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -535,6 +609,18 @@ def prepare_trade(analysis_id):
         "proposal": trade_result.get("proposal"),
         "action_mode": trade_result.get("action_mode"),
     }), 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  GET /api/opportunities/confirmations
+# ─────────────────────────────────────────────────────────────────────────────
+
+@opportunities_bp.route("/confirmations", methods=["GET"])
+@require_auth
+def get_pending_trade_confirmations():
+    result = list_active_confirmations(user_id=g.uid)
+    http_status = result.pop("http_status", 200)
+    return jsonify(result), http_status
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  GET /api/opportunities/confirmations/<confirmation_id>

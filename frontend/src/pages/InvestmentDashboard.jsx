@@ -448,6 +448,7 @@ export default function InvestmentDashboard({ userName }) {
   const [scanStatus, setScanStatus] = useState('');
   const [scanning, setScanning] = useState(false);
   const dateFilterRef = useRef(null);
+  const scanPollRef = useRef(null);
 
   const fetchData = useCallback(async () => {
     const user = auth.currentUser;
@@ -506,6 +507,14 @@ export default function InvestmentDashboard({ userName }) {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [showDatePicker]);
 
+  useEffect(() => {
+    return () => {
+      if (scanPollRef.current) {
+        window.clearInterval(scanPollRef.current);
+      }
+    };
+  }, []);
+
   const holdings = useMemo(() => computeHoldings(trades, currentPrices), [trades, currentPrices]);
 
   const openHoldings = holdings.filter((h) => h.qty > 0).sort((a, b) => b.marketValue - a.marketValue);
@@ -541,8 +550,44 @@ export default function InvestmentDashboard({ userName }) {
     const user = auth.currentUser;
     if (!user || scanning) return;
 
+    const stopPolling = () => {
+      if (scanPollRef.current) {
+        window.clearInterval(scanPollRef.current);
+        scanPollRef.current = null;
+      }
+    };
+
+    const pollScanStatus = async () => {
+      try {
+        const token = await user.getIdToken();
+        const statusRes = await axios.get(
+          `${API_BASE}/opportunities/scan/status`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const status = statusRes.data?.status;
+
+        if (status === 'COMPLETED') {
+          stopPolling();
+          setScanning(false);
+          setScanStatus(
+            `Scan complete. Found ${statusRes.data?.buy_opportunities || 0} BUY and ${statusRes.data?.sell_opportunities || 0} SELL opportunities.`
+          );
+          fetchData();
+        } else if (status === 'FAILED') {
+          stopPolling();
+          setScanning(false);
+          setScanStatus(statusRes.data?.error || 'Scan failed.');
+        }
+      } catch (err) {
+        stopPolling();
+        setScanning(false);
+        setScanStatus(err.response?.data?.error || err.message || 'Could not read scan status.');
+      }
+    };
+
     setScanning(true);
     setScanStatus('');
+    stopPolling();
 
     try {
       const token = await user.getIdToken();
@@ -553,13 +598,15 @@ export default function InvestmentDashboard({ userName }) {
       );
 
       if (res.data?.status === 'SCAN_STARTED') {
-        setScanStatus('Scan started. Results will appear after the backend finishes.');
+        setScanStatus('Scan started. The button will unlock when the backend finishes.');
+        scanPollRef.current = window.setInterval(pollScanStatus, 3000);
+        pollScanStatus();
       } else {
         setScanStatus(res.data?.status || 'Scan request sent.');
+        setScanning(false);
       }
     } catch (err) {
       setScanStatus(err.response?.data?.error || err.message || 'Could not start scan.');
-    } finally {
       setScanning(false);
     }
   };

@@ -70,6 +70,18 @@ export async function requestAndRegisterFcmToken() {
   return fcmToken;
 }
 
+export async function getPendingTradeConfirmations() {
+  const headers = await authHeaders();
+  const response = await fetch(`${API_BASE}/opportunities/confirmations`, {
+    headers,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || 'Could not load pending confirmations.');
+  }
+  return data.confirmations || [];
+}
+
 export async function subscribeToForegroundMessages(callback) {
   const supported = await isSupported().catch(() => false);
   if (!supported) return () => {};
