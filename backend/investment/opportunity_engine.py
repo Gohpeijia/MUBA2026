@@ -341,17 +341,8 @@ def _execute_scan_pipeline():
         f"BUY scan complete. {len(valid_opportunities)} opportunities found. {len(new_opportunities)} new."
     )
 
-    if new_opportunities:
-        # BUY opportunities broadcast to every opted-in user — discovery is
-        # not user-specific, unlike SELL. This is the generic "new
-        # opportunity found" push only.
-        submit_notification_job(new_opportunities)
-
-        # Separately, actually act on it per each user's saved execution
-        # mode (alert-only / confirm-each / fully automated). Without this,
-        # AUTOMATED_MODE users never get an auto-executed trade from the
-        # scanner — only the passive discovery notification above.
-        submit_dispatch_job(new_opportunities, kind="BUY")
+    if valid_opportunities:
+        submit_dispatch_job(valid_opportunities, kind="BUY")
 
     return _LATEST_OPPORTUNITIES
 

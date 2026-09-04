@@ -46,12 +46,55 @@
   font-size: 2.6rem;
 }
 
+.inv-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.inv-scan-btn {
+  flex-shrink: 0;
+  border: 1.5px solid var(--teal);
+  border-radius: 999px;
+  background: var(--teal);
+  color: #fff;
+  padding: 0.55rem 1.1rem;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.inv-scan-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.inv-scan-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.inv-scan-status {
+  margin-top: 0.6rem;
+  color: var(--teal);
+}
+
 @media (max-width: 768px) {
   .risk-page {
     padding: 1rem;
   }
   .risk-main-title {
     font-size: 2.2rem;
+  }
+  .inv-header-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .inv-scan-btn {
+    width: fit-content;
   }
 }
 

@@ -601,6 +601,12 @@ def update_profile():
             update_payload["email"] = email
 
         if preference_data:
+            auto_hedging_value = preference_data.get('autoHedgingAgent', '')
+            canonical_modes = {
+                'Yes, fully autonomous hedging': 'fully_autonomous',
+                'Yes, but confirm before executing on-chain': 'confirmation_required',
+                'No, I will hedge manually': 'manual',
+            }
             update_payload["preference"] = {
                 "employmentStatus":     preference_data.get('employmentStatus', ''),
                 "monthlyIncome":        float(preference_data.get('monthlyIncome', 0.0)),
@@ -608,6 +614,7 @@ def update_profile():
                 "riskTolerance":        preference_data.get('riskTolerance', ''),
                 "riskCopilotMode":      preference_data.get('riskCopilotMode', ''),
                 "autoHedgingAgent":     preference_data.get('autoHedgingAgent', ''),
+                "opportunityAutoActionMode": canonical_modes.get(auto_hedging_value, ''),
                 "primaryGoal":          preference_data.get('primaryGoal', '')
             }
             # This is the flag Auth.jsx's redirectAfterAuth() checks to decide
@@ -636,10 +643,15 @@ def update_hedging_agent():
         if value not in valid_options:
             return jsonify({"success": False, "error": "Invalid hedging mode."}), 400
 
-        # Dot-notation update — only touches this one nested field,
-        # leaves the rest of `preference` (riskTolerance, primaryGoal, etc.) untouched.
+        canonical_modes = {
+            'Yes, fully autonomous hedging': 'fully_autonomous',
+            'Yes, but confirm before executing on-chain': 'confirmation_required',
+            'No, I will hedge manually': 'manual',
+        }
+
         db.collection('users').document(user_id).update({
-            'preference.autoHedgingAgent': value
+            'preference.autoHedgingAgent': value,
+            'preference.opportunityAutoActionMode': canonical_modes[value],
         })
 
         return jsonify({

@@ -246,7 +246,7 @@ def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: i
     if not proposal:
         return mark_confirmation_failed(user_id, confirmation_id, "No proposal snapshot is available.", data=data)
 
-    execution = execute_trade_proposal(proposal, action="CONFIRMATION_LINK")
+    execution = execute_trade_proposal(proposal, action="CONFIRMATION_LINK", user_id=user_id)
     status = execution.get("status") or (EXECUTED if execution.get("ok") else FAILED)
 
     if status == NEEDS_RECONFIRMATION:

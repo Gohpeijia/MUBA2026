@@ -305,6 +305,8 @@ export default function InvestmentDashboard({ userName }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
+  const [scanning, setScanning] = useState(false);
   const dateFilterRef = useRef(null);
 
   const fetchData = useCallback(async () => {
@@ -395,6 +397,33 @@ export default function InvestmentDashboard({ userName }) {
     setDateTo('');
   };
 
+  const triggerOpportunityScan = async () => {
+    const user = auth.currentUser;
+    if (!user || scanning) return;
+
+    setScanning(true);
+    setScanStatus('');
+
+    try {
+      const token = await user.getIdToken();
+      const res = await axios.post(
+        `${API_BASE}/opportunities/scan`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (res.data?.status === 'SCAN_STARTED') {
+        setScanStatus('Scan started. Results will appear after the backend finishes.');
+      } else {
+        setScanStatus(res.data?.status || 'Scan request sent.');
+      }
+    } catch (err) {
+      setScanStatus(err.response?.data?.error || err.message || 'Could not start scan.');
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const dateFilterLabel = dateFrom && dateTo
     ? `${fmtPickerDate(dateFrom)} – ${fmtPickerDate(dateTo)}`
     : dateFrom
@@ -418,10 +447,23 @@ export default function InvestmentDashboard({ userName }) {
   return (
     <div className="risk-page inv-page">
       <div className="risk-header">
-        <h1 className="risk-main-title inv-greeting">
-          {getGreeting()}{userName ? `, ${userName}` : ''} 👋
-        </h1>
-        <p className="risk-subtitle">Here's what the AI has bought, sold, and earned so far.</p>
+        <div className="inv-header-row">
+          <div>
+            <h1 className="risk-main-title inv-greeting">
+              {getGreeting()}{userName ? `, ${userName}` : ''} 👋
+            </h1>
+            <p className="risk-subtitle">Here's what the AI has bought, sold, and earned so far.</p>
+          </div>
+          <button
+            type="button"
+            className="inv-scan-btn"
+            onClick={triggerOpportunityScan}
+            disabled={scanning}
+          >
+            {scanning ? 'Scanning...' : 'Scan'}
+          </button>
+        </div>
+        {scanStatus && <p className="risk-subtitle inv-scan-status">{scanStatus}</p>}
         {error && <p className="risk-subtitle" style={{ color: 'var(--red, #c0392b)' }}>{error}</p>}
       </div>
 

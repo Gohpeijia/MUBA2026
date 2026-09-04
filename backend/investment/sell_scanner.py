@@ -290,11 +290,6 @@ def _execute_sell_scan_pipeline():
     )
     
     if new_opportunities:
-        # Generic "new SELL signal found" push to current holders.
-        opportunity_engine.submit_notification_job(
-            new_opportunities
-        )
-
         # Actually act on it per each holder's saved execution mode
         # (alert-only / confirm-each / fully automated). dispatch_sell_
         # opportunity already scopes to opportunity['holder_user_ids'],
