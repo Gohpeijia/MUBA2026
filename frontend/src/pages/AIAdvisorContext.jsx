@@ -236,6 +236,11 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
     }
 
     if (data.success && data.data) {
+      if (data.data.opportunity_confirmation?.confirmation_id) {
+        window.dispatchEvent(new CustomEvent('trade-confirmation:created', {
+          detail: data.data.opportunity_confirmation,
+        }));
+      }
       if (data.data.final_advice) {
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -277,4 +282,3 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
 }
 
 export const useAIAdvisor = () => useContext(AIAdvisorContext);
-
