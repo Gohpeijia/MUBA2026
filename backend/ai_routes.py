@@ -97,6 +97,19 @@ def _order_field(order: dict, *names):
     return None
 
 
+def _parse_positive_float(value, field_name: str):
+    """Parse user/client supplied numeric input without truthy-string surprises."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None, f"{field_name} must be a positive number."
+
+    if parsed <= 0:
+        return None, f"{field_name} must be greater than 0."
+
+    return parsed, None
+
+
 def _same_contract(order: dict, option_type, strike, expiry) -> bool:
     """Match a live order by stable contract identity, never by index."""
     order_type = _order_field(order, "option_type", "optionType", "type")
@@ -156,6 +169,17 @@ def _execute_automated_trade(proposal: dict) -> dict:
         if collateral_usdc is None:
             collateral_usdc = proposal.get("collateral_usdc")
 
+        collateral_usdc, collateral_error = _parse_positive_float(
+            collateral_usdc,
+            "collateral_usdc",
+        )
+        if collateral_error:
+            return {
+                "ok": False,
+                "status": "FAILED",
+                "error": f"Automated BUY was blocked: {collateral_error}",
+            }
+
         orders = trader.get_live_orders(
             underlying=ticker,
             option_type=option_type,
@@ -196,7 +220,7 @@ def _execute_automated_trade(proposal: dict) -> dict:
         valid, reason = validate_confirmation(
             selector=selector,
             wallet=wallet,
-            collateral_usdc=float(collateral_usdc),
+            collateral_usdc=collateral_usdc,
             current_order=current_order,
         )
         if not valid:
@@ -207,7 +231,7 @@ def _execute_automated_trade(proposal: dict) -> dict:
             }
 
         execution = trader.execute_fill(
-            collateral_usdc=float(collateral_usdc),
+            collateral_usdc=collateral_usdc,
             underlying=str(ticker).upper(),
             option_type=str(option_type).upper(),
             strike=strike,
@@ -449,7 +473,7 @@ def confirm_trade():
         user_id = g.uid
 
         selector = data.get("selector") or {}
-        force = bool(data.get("force"))
+        force = data.get("force") is True
 
         ticker = selector.get("underlying")
         option_type = selector.get("option_type")
@@ -498,13 +522,15 @@ def confirm_trade():
             }), 400
 
         if decision == "BUY":
-            if collateral_usdc is None or float(collateral_usdc) <= 0:
+            collateral_usdc, collateral_error = _parse_positive_float(
+                collateral_usdc,
+                "collateral_usdc",
+            )
+            if collateral_error:
                 return jsonify({
                     "success": False,
-                    "error": "BUY requires a positive collateral_usdc amount.",
+                    "error": f"BUY requires valid collateral_usdc: {collateral_error}",
                 }), 400
-
-            collateral_usdc = float(collateral_usdc)
 
         else:
             # SELL does not use collateral_usdc.
@@ -567,7 +593,47 @@ def confirm_trade():
             rolled_off = current_order is None
 
             if rolled_off:
-                current_order = orders["data"][0]
+                replacement_order = orders["data"][0]
+                return jsonify({
+                    "success": True,
+                    "data": {
+                        "status": "NEEDS_RECONFIRMATION",
+                        "reason": (
+                            "That order rolled off the book — "
+                            "please review and confirm the current order."
+                        ),
+                        "previous": selector,
+                        "current": {
+                            "underlying": ticker,
+                            "option_type": _order_field(
+                                replacement_order,
+                                "option_type",
+                                "optionType",
+                                "type",
+                            ),
+                            "strike": _order_field(
+                                replacement_order,
+                                "strike",
+                                "strikePrice",
+                                "strike_price",
+                            ),
+                            "expiry": _order_field(
+                                replacement_order,
+                                "expiry",
+                                "expiryTimestamp",
+                                "expiration",
+                                "expirationTimestamp",
+                            ),
+                            "price": _order_field(
+                                replacement_order,
+                                "price_per_contract",
+                                "price",
+                                "premium",
+                                "unitPrice",
+                            ),
+                        },
+                    },
+                })
 
             current_type = _order_field(
                 current_order,
@@ -593,8 +659,8 @@ def confirm_trade():
                 "price_per_contract",
                 "price",
                 "premium",
+                "unitPrice",
             )
-
             # -----------------------------------------------------------
             # 4A. Detect material change
             # -----------------------------------------------------------

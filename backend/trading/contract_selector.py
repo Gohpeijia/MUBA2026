@@ -99,7 +99,12 @@ def select_contract(
 
         strike_raw = order.get("strike") or order.get("strikePrice")
         expiry_raw = order.get("expiry") or order.get("expiryTimestamp") or order.get("expiration")
-        price_raw  = order.get("price") or order.get("premium") or order.get("unitPrice")
+        price_raw  = (
+            order.get("price_per_contract") or
+            order.get("price") or
+            order.get("premium") or
+            order.get("unitPrice")
+        )
 
         # ── Skip if required fields are missing ──
         if not opt_type or strike_raw is None or expiry_raw is None:

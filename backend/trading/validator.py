@@ -197,6 +197,7 @@ def validate_confirmation(
     # the previewed price (from /chat) and the current live price
     if current_order:
         current_price = (
+            current_order.get("price_per_contract") or
             current_order.get("price") or
             current_order.get("premium") or
             current_order.get("unitPrice")

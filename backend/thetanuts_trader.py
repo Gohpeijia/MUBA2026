@@ -78,10 +78,10 @@ LOCAL_TX_LOG_PATH = Path(__file__).parent / "data" / "thetanuts_transactions.jso
 class ThetanutsTrader:
     def __init__(self):
         self.env = os.environ.copy()
-        self.npx_command = shutil.which("npx.cmd") or shutil.which("npx") or "npx.cmd"
+        self.npx_command = shutil.which("npx.cmd") or shutil.which("npx")
         if not self.npx_command:
             raise RuntimeError("npx.cmd was not found on PATH")
-        self.rpc_url = os.getenv("BASE_RPC_URL", DEFAULT_RPC_URL)
+        self.rpc_url = os.getenv("BASE_RPC_URL") or os.getenv("THETANUTS_RPC_URL") or DEFAULT_RPC_URL
         self.private_key = os.getenv("WALLET_PRIVATE_KEY")
 
         self.w3 = None
