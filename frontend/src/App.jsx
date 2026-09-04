@@ -6,6 +6,7 @@ import Auth from './pages/Auth';
 import Stocks from './pages/Stocks';
 import Preferences from './pages/Preferences';
 import InvestmentDashboard from './pages/InvestmentDashboard';
+import OpportunityConfirmation from './pages/OpportunityConfirmation';
 
 
 import { FaThLarge, FaRobot, FaSignOutAlt, FaChartLine, FaWallet } from 'react-icons/fa';
@@ -52,6 +53,8 @@ function useAuthState() {
  * never render blank or flash briefly before redirecting.
  */
 function RequireAuth({ user, authLoading, children }) {
+  const location = useLocation();
+
   if (authLoading) {
     return (
       <div style={{
@@ -62,8 +65,18 @@ function RequireAuth({ user, authLoading, children }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) {
+    window.localStorage.setItem('postLoginRedirect', `${location.pathname}${location.search}`);
+    return <Navigate to="/" replace />;
+  }
   return children;
+}
+
+
+function LoginRedirect() {
+  const redirectTo = window.localStorage.getItem('postLoginRedirect') || '/dashboard';
+  window.localStorage.removeItem('postLoginRedirect');
+  return <Navigate to={redirectTo} replace />;
 }
 
 function NavBar() {
@@ -158,10 +171,15 @@ function AppShell() {
           } />
           {/* Already logged in and hitting the login page (e.g. a refresh)?
               Send them straight to the dashboard instead of showing Auth. */}
+          <Route path="/opportunities/confirm/:confirmationId" element={
+            <RequireAuth user={user} authLoading={authLoading}>
+              <OpportunityConfirmation />
+            </RequireAuth>
+          } />
           <Route path="/" element={
             authLoading
               ? null
-              : (user ? <Navigate to="/dashboard" replace /> : <Auth />)
+              : (user ? <LoginRedirect /> : <Auth />)
           } />
           {/* Catch-all: any unknown/stale path (like a leftover /risk-copilot
               or /zakat reference) lands somewhere real instead of a blank

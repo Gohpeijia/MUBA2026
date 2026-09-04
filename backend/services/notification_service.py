@@ -698,6 +698,128 @@ def notify_users_of_opportunities(
     return successful_analysis_ids
 
 
+
+
+def _get_user_tokens(db, user_id: str) -> List[str]:
+    try:
+        doc = db.collection("users").document(user_id).get()
+    except Exception:
+        logger.exception("Failed to load FCM tokens for user %s", user_id)
+        return []
+
+    if not doc.exists:
+        return []
+
+    data = doc.to_dict() or {}
+    tokens = data.get("fcm_tokens", [])
+    if not isinstance(tokens, list):
+        return []
+
+    return list({token.strip() for token in tokens if isinstance(token, str) and token.strip()})
+
+
+def _send_to_user(user_id: str, title: str, body: str, data: Dict[str, Any]) -> bool:
+    db = firestore.client()
+    tokens = _get_user_tokens(db, user_id)
+    if not tokens:
+        logger.info("No FCM tokens for user %s", user_id)
+        return False
+
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body),
+        data={key: str(value) for key, value in (data or {}).items() if value is not None},
+        tokens=tokens,
+    )
+
+    try:
+        response = messaging.send_each_for_multicast(message)
+    except Exception:
+        logger.exception("FCM send failed for user %s", user_id)
+        return False
+
+    tokens_to_remove = []
+    for idx, resp in enumerate(response.responses):
+        if resp.success:
+            continue
+        err_code = resp.exception.code if resp.exception else ""
+        if err_code in ("UNREGISTERED", "INVALID_ARGUMENT"):
+            tokens_to_remove.append(tokens[idx])
+
+    if tokens_to_remove:
+        _cleanup_invalid_tokens(db, tokens_to_remove, {token: user_id for token in tokens_to_remove})
+
+    return response.success_count > 0
+
+
+def notify_alert_only(user_id: str, opportunity: Dict[str, Any]) -> bool:
+    symbol = opportunity.get("symbol", "N/A")
+    decision = str(opportunity.get("decision", "N/A")).upper()
+    confidence = _to_float(opportunity.get("confidence")) or 0.0
+    return _send_to_user(
+        user_id=user_id,
+        title="Portfolio alert" if decision == "SELL" else "New investment opportunity",
+        body=f"{symbol} {decision} signal detected. {int(confidence * 100)}% AI confidence.",
+        data={
+            "type": "OPPORTUNITY_ALERT",
+            "analysis_id": opportunity.get("analysis_id"),
+            "symbol": symbol,
+            "decision": decision,
+            "route": "/dashboard",
+        },
+    )
+
+
+def notify_confirmation_required(user_id: str, opportunity: Dict[str, Any], confirmation: Dict[str, Any]) -> bool:
+    symbol = opportunity.get("symbol") or confirmation.get("symbol") or "N/A"
+    decision = str(opportunity.get("decision") or confirmation.get("decision") or "N/A").upper()
+    confirmation_id = confirmation.get("confirmation_id")
+    route = f"/opportunities/confirm/{confirmation_id}"
+    confidence = _to_float(opportunity.get("confidence") or confirmation.get("confidence")) or 0.0
+
+    if decision == "SELL":
+        body = f"{symbol} SELL signal detected. Review your current position before closing it."
+    else:
+        body = f"{symbol} BUY opportunity detected. {int(confidence * 100)}% AI confidence. Review before execution."
+
+    return _send_to_user(
+        user_id=user_id,
+        title="Trade confirmation required",
+        body=body,
+        data={
+            "type": "TRADE_CONFIRMATION",
+            "confirmation_id": confirmation_id,
+            "analysis_id": opportunity.get("analysis_id") or confirmation.get("analysis_id"),
+            "symbol": symbol,
+            "decision": decision,
+            "route": route,
+        },
+    )
+
+
+def notify_execution_result(user_id: str, opportunity: Dict[str, Any], result: Dict[str, Any]) -> bool:
+    symbol = opportunity.get("symbol", "N/A")
+    decision = str(opportunity.get("decision", "N/A")).upper()
+    status = (result or {}).get("status", "FAILED")
+    ok = bool((result or {}).get("ok"))
+    title = "Trade execution completed" if ok else "Trade execution blocked"
+    body = f"{symbol} {decision}: {status}."
+    if (result or {}).get("error"):
+        body = f"{body} {result.get('error')}"
+
+    return _send_to_user(
+        user_id=user_id,
+        title=title,
+        body=body,
+        data={
+            "type": "TRADE_EXECUTION_RESULT",
+            "analysis_id": opportunity.get("analysis_id"),
+            "symbol": symbol,
+            "decision": decision,
+            "status": status,
+            "route": "/dashboard",
+        },
+    )
+
 def _cleanup_invalid_tokens(
     db,
     tokens_to_remove: List[str],

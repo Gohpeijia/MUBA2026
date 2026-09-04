@@ -41,7 +41,12 @@ from investment.sell_scanner import (
     get_latest_sell_opportunities,
 )
 
-from advisor.trade_bridge import build_trade_proposal
+from services.opportunity_prepare_service import prepare_opportunity_for_user
+from services.trade_confirmation_service import (
+    get_confirmation,
+    confirm_confirmation,
+    reject_confirmation,
+)
 
 from ai_agent import trader
 from firebase_config import db
@@ -501,14 +506,9 @@ def prepare_trade(analysis_id):
     # It does NOT execute anything.
 
     try:
-        trade_result = build_trade_proposal(
-            symbol=symbol,
-            decision=decision,
-            investment_analysis=analysis,
-            preferences=preferences,
-            portfolio=portfolio,
-            trader=trader,
-            spot_price=spot_price,
+        trade_result = prepare_opportunity_for_user(
+            user_id=user_id,
+            opportunity_entry=entry,
         )
 
     except Exception:
@@ -534,3 +534,52 @@ def prepare_trade(analysis_id):
         "proposal": trade_result.get("proposal"),
         "action_mode": trade_result.get("action_mode"),
     }), 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  GET /api/opportunities/confirmations/<confirmation_id>
+# ─────────────────────────────────────────────────────────────────────────────
+
+@opportunities_bp.route("/confirmations/<confirmation_id>", methods=["GET"])
+@require_auth
+def get_trade_confirmation(confirmation_id):
+    result = get_confirmation(
+        user_id=g.uid,
+        confirmation_id=confirmation_id,
+    )
+
+    http_status = result.pop("http_status", 200)
+    return jsonify(result), http_status
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  POST /api/opportunities/confirmations/<confirmation_id>/decision
+# ─────────────────────────────────────────────────────────────────────────────
+
+@opportunities_bp.route("/confirmations/<confirmation_id>/decision", methods=["POST"])
+@require_auth
+def decide_trade_confirmation(confirmation_id):
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("decision", "")).upper().strip()
+
+    if action not in ("CONFIRM", "REJECT"):
+        return jsonify({
+            "success": False,
+            "status": "INVALID_REQUEST",
+            "error": "decision must be CONFIRM or REJECT",
+        }), 400
+
+    if action == "REJECT":
+        result = reject_confirmation(
+            user_id=g.uid,
+            confirmation_id=confirmation_id,
+        )
+    else:
+        result = confirm_confirmation(
+            user_id=g.uid,
+            confirmation_id=confirmation_id,
+            proposal_version=payload.get("proposal_version"),
+            terms_hash=payload.get("terms_hash"),
+        )
+
+    http_status = result.pop("http_status", 200)
+    return jsonify(result), http_status
