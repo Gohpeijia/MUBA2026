@@ -132,11 +132,12 @@ class AIAgent:
         user_input:         str,
         ticker:             str  = None,
         chat_history:       list = None,
-        page_context:       str  = "Unknown",
+        page_context:       str = "Unknown",
         preferences:        dict = None,
         previous_consensus: dict = None,
         user_goal:          dict = None,
         portfolio:          dict = None,
+        requested_action:   str = None,
     ):
         # ── 1. INTELLIGENT ASSET RESOLUTION ──────────────────────────────────
         # Resolves queries with typos (e.g. "NASDAS 100"), aliases ("NDX", "US100", "Gold"),
@@ -149,33 +150,77 @@ class AIAgent:
         if resolved_asset:
             sym = resolved_asset["symbol"]
             canonical_name = resolved_asset["canonical_name"]
-            spot_price = resolved_asset.get("price")  # may be None for some assets
-            print(f"🎯 [AIAgent] Asset resolved: '{user_input}' -> {canonical_name} ({sym}). Triggering 5-Agent Intelligence...")
-
+        
+            print(
+                f"🎯 [AIAgent] Asset resolved: '{user_input}' -> "
+                f"{canonical_name} ({sym}). Triggering 5-Agent Intelligence..."
+            )
+        
             try:
-                # Run the full 5-agent pipeline (Technical, Fundamental, News, Risk, Committee)
-                investment_analysis = self.swarm_engine.analyze_stock_sync(sym, user_question=user_input)
-
-                # Format a clean, professional executive summary for the text bubble
+                # Run the full 5-agent pipeline
+                investment_analysis = self.swarm_engine.analyze_stock_sync(
+                    sym,
+                    user_question=user_input
+                )
+        
+                # ── CANONICAL CURRENT PRICE ─────────────────────────────────
+                # Price comes from the same canonical market snapshot used by
+                # the investment-analysis pipeline.
+                spot_price = investment_analysis.get("current_price")
+        
+                try:
+                    spot_price = float(spot_price)
+                except (TypeError, ValueError):
+                    spot_price = None
+        
+                print(
+                    f"💰 [AIAgent] Current spot price for {sym}: {spot_price}"
+                )
+        
+                # ── EXPLICIT USER BUY ───────────────────────────────────────
+                # Local testing: explicit "buy ..." overrides committee decision.
+                if requested_action == "BUY":
+                    print(
+                        f"🧪 [AIAgent] Explicit BUY request detected — "
+                        f"overriding committee decision "
+                        f"{investment_analysis.get('decision', 'HOLD')} -> BUY"
+                    )
+                    investment_analysis["decision"] = "BUY"
+        
                 decision = investment_analysis.get("decision", "HOLD")
-                conf_pct = int(investment_analysis.get("confidence", 0.5) * 100)
+                conf_pct = int(
+                    investment_analysis.get("confidence", 0.5) * 100
+                )
                 risk_lvl = investment_analysis.get("risk_level", "MEDIUM")
                 summary = investment_analysis.get("summary", "")
                 bulls = investment_analysis.get("bull_case", [])
                 bears = investment_analysis.get("bear_case", [])
-
-                summary_md = f"### 📊 Investment Assessment: {canonical_name} ({sym})\n\n"
-                summary_md += f"**Committee Decision:** `{decision}` (Evidence Conviction: **{conf_pct}%**) · Risk Level: **{risk_lvl}**\n\n"
+        
+                summary_md = (
+                    f"### 📊 Investment Assessment: "
+                    f"{canonical_name} ({sym})\n\n"
+                )
+        
+                summary_md += (
+                    f"**Committee Decision:** `{decision}` "
+                    f"(Evidence Conviction: **{conf_pct}%**) · "
+                    f"Risk Level: **{risk_lvl}**\n\n"
+                )
+        
                 summary_md += f"{summary}\n\n"
-
+        
                 if bulls:
                     summary_md += f"**Key Catalyst:** {bulls[0]}\n"
+        
                 if bears:
                     summary_md += f"**Primary Concern:** {bears[0]}\n\n"
-
-                summary_md += "_Explore the full multi-agent breakdown, bull/bear cases, chart, and invalidation triggers in the research card below._"
-
-                # ── Build trade proposal if decision is actionable ──────────────
+        
+                summary_md += (
+                    "_Explore the full multi-agent breakdown, bull/bear cases, "
+                    "chart, and invalidation triggers in the research card below._"
+                )
+        
+                # ── Build trade proposal ────────────────────────────────────
                 trade_result = build_trade_proposal(
                     symbol=sym,
                     decision=decision,
@@ -185,30 +230,38 @@ class AIAgent:
                     trader=trader,
                     spot_price=spot_price,
                 )
-
-                # Append trade status to the summary shown in the chat bubble
+        
+                # Append trade status
                 if trade_result["status"] == "EXECUTABLE":
                     prop = trade_result["proposal"]
+        
                     summary_md += (
-                        f"\n\n---\n🔗 **Live Thetanuts Contract Found** · "
+                        f"\n\n---\n"
+                        f"🔗 **Live Thetanuts Contract Found** · "
                         f"{prop['option_type']} Strike: `{prop['strike']}` · "
                         f"Collateral: `{prop['collateral_usdc']} USDC`"
                     )
+        
                 elif decision in ("BUY", "SELL"):
-                    summary_md += f"\n\n---\n⚠️ **Trade Note:** {trade_result['reason']}"
-
+                    summary_md += (
+                        f"\n\n---\n"
+                        f"⚠️ **Trade Note:** {trade_result['reason']}"
+                    )
+        
                 return {
-                    "status":              "SUCCESS",
-                    "response_type":       "investment_intelligence",
-                    "final_advice":        summary_md,
+                    "status": "SUCCESS",
+                    "response_type": "investment_intelligence",
+                    "final_advice": summary_md,
                     "investment_analysis": investment_analysis,
-                    "trade_proposal":      trade_result.get("proposal"),
-                    "trade_status":        trade_result["status"],
-                    "trade_reason":        trade_result["reason"],
+                    "trade_proposal": trade_result.get("proposal"),
+                    "trade_status": trade_result["status"],
+                    "trade_reason": trade_result["reason"],
                 }
-
+        
             except Exception as e:
-                print(f"⚠️ [AIAgent] Multi-Agent Pipeline error for {sym}: {e}")
+                print(
+                    f"⚠️ [AIAgent] Multi-Agent Pipeline error for {sym}: {e}"
+                )
 
         # ── 3. GENERAL CONVERSATION / GENERAL FINANCE QUESTION ────────────────
         print(f"ℹ️ [AIAgent] General financial inquiry. Generating conversational guidance...")

@@ -398,6 +398,11 @@ def chat_with_agent():
         if len(chat_history) > 20:
             chat_history = chat_history[-20:]
 
+        requested_action = None
+
+        if user_message.strip().lower().startswith("buy "):
+            requested_action = "BUY"
+
         # 3. Run the AI agent
         result = agent.process(
             user_input   = user_message,
@@ -406,8 +411,25 @@ def chat_with_agent():
             page_context = page_context,
             preferences  = preferences,
             user_goal    = tabung_goal,
-            portfolio    = portfolio_data
+            portfolio    = portfolio_data,
+            requested_action = requested_action,
         )
+        # LOCAL TEST: explicit user BUY command forces BUY execution.
+        # The AI analysis can still say HOLD/SELL, but an explicit "buy ..."
+        # command is treated as the user's requested trade action.
+        if user_message.strip().lower().startswith("buy "):
+            trade_proposal = result.get("trade_proposal")
+
+            if trade_proposal:
+                trade_proposal["decision"] = "BUY"
+
+                selector = trade_proposal.get("selector")
+                if isinstance(selector, dict):
+                    selector["decision"] = "BUY"
+
+                result["trade_status"] = "EXECUTABLE"
+                result["trade_proposal"] = trade_proposal
+                result["trade_reason"] = "User explicitly requested BUY."
 
         if result.get("status") == "ERROR":
             return jsonify({"success": False, "error": result["final_advice"]}), 503
