@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 from firebase_admin import firestore
 
 from firebase_config import db
+from services.execution_service import execute_prepared_proposal
 from services.opportunity_prepare_service import prepare_opportunity_for_user
-from services.trade_execution_service import execute_trade_proposal
 from trading.execution_modes import CONFIRMATION_MODE
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,8 @@ VALIDATING = "VALIDATING"
 NEEDS_RECONFIRMATION = "NEEDS_RECONFIRMATION"
 EXECUTING = "EXECUTING"
 EXECUTED = "EXECUTED"
+DRY_RUN_OK = "DRY_RUN_OK"
+PAPER_EXECUTED = "PAPER_EXECUTED"
 REJECTED = "REJECTED"
 FAILED = "FAILED"
 EXPIRED = "EXPIRED"
@@ -28,7 +30,16 @@ STALE = "STALE"
 RECOMMEND_ONLY = "RECOMMEND_ONLY"
 
 ACTIVE_CONFIRM_STATUSES = {PENDING, NEEDS_RECONFIRMATION}
-TERMINAL_STATUSES = {EXECUTED, REJECTED, FAILED, EXPIRED, STALE, RECOMMEND_ONLY}
+TERMINAL_STATUSES = {
+    EXECUTED,
+    DRY_RUN_OK,
+    PAPER_EXECUTED,
+    REJECTED,
+    FAILED,
+    EXPIRED,
+    STALE,
+    RECOMMEND_ONLY,
+}
 
 
 def now_iso() -> str:
@@ -47,6 +58,13 @@ def parse_dt(value):
     return None
 
 
+def _first_present(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def confirmation_ref(user_id: str, confirmation_id: str):
     return (
         db.collection("users")
@@ -56,18 +74,82 @@ def confirmation_ref(user_id: str, confirmation_id: str):
     )
 
 
+def _confirmations_collection(user_id: str):
+    return db.collection("users").document(user_id).collection("trade_confirmations")
+
+
+def _find_active_confirmation(user_id: str, analysis_id: str | None, kind: str) -> dict | None:
+    if not analysis_id:
+        return None
+
+    try:
+        docs = (
+            _confirmations_collection(user_id)
+            .where("analysis_id", "==", analysis_id)
+            .stream()
+        )
+        now = datetime.now(timezone.utc)
+        for snap in docs:
+            data = snap.to_dict() or {}
+            if data.get("status") not in ACTIVE_CONFIRM_STATUSES:
+                continue
+            if str(data.get("kind") or "").upper() != str(kind or "").upper():
+                continue
+            expires_at = parse_dt(data.get("expires_at"))
+            if expires_at and now >= expires_at:
+                continue
+            return data
+    except Exception:
+        logger.exception("Failed to search active confirmations for user %s / %s", user_id, analysis_id)
+    return None
+
+
 def normalize_terms(proposal: dict) -> dict:
-    selector = (proposal or {}).get("selector") or {}
+    proposal = proposal or {}
+    selector = proposal.get("selector") or proposal.get("confirm_selector") or {}
+    if not isinstance(selector, dict):
+        selector = {}
+
+    symbol = _first_present(
+        proposal.get("symbol"),
+        proposal.get("ticker"),
+        proposal.get("underlying"),
+        selector.get("underlying"),
+    )
+    decision = _first_present(
+        selector.get("decision"),
+        proposal.get("decision"),
+        proposal.get("action"),
+    )
+
     return {
+        "execution_target": proposal.get("execution_target"),
+        "asset_type": proposal.get("asset_type") or proposal.get("assetType"),
+        "symbol": str(symbol).upper() if symbol else None,
+        "ticker": str(proposal.get("ticker") or symbol).upper() if (proposal.get("ticker") or symbol) else None,
+        "decision": str(decision).upper() if decision else None,
         "underlying": selector.get("underlying") or proposal.get("underlying"),
         "option_type": selector.get("option_type") or proposal.get("option_type"),
         "strike": selector.get("strike") or proposal.get("strike"),
         "expiry": selector.get("expiry") or proposal.get("expiry"),
-        "previewed_price": selector.get("previewed_price") or selector.get("price"),
+        "previewed_price": _first_present(
+            selector.get("previewed_price"),
+            selector.get("price_per_contract"),
+            selector.get("price"),
+            proposal.get("previewed_price"),
+            proposal.get("price"),
+        ),
         "collateral_usdc": selector.get("collateral_usdc") or proposal.get("collateral_usdc"),
-        "decision": selector.get("decision") or proposal.get("decision") or proposal.get("action"),
         "reserve_price": selector.get("reserve_price") or proposal.get("reserve_price"),
-        "quantity": selector.get("quantity") or selector.get("contracts"),
+        "quantity": _first_present(
+            selector.get("quantity"),
+            selector.get("contracts"),
+            proposal.get("quantity"),
+            proposal.get("shares"),
+        ),
+        "shares": proposal.get("shares"),
+        "price": proposal.get("price"),
+        "estimated_value": proposal.get("estimated_value"),
     }
 
 
@@ -89,15 +171,21 @@ def public_confirmation(doc: dict) -> dict:
 
 
 def create_confirmation(user_id: str, opportunity: dict) -> dict:
+    kind = str(opportunity.get("kind") or opportunity.get("decision") or "BUY").upper()
+    analysis_id = opportunity.get("analysis_id")
+    existing = _find_active_confirmation(user_id, analysis_id, kind)
+    if existing:
+        return {"success": True, "confirmation": public_confirmation(existing), "http_status": 200, "duplicate": True}
+
     prepared = prepare_opportunity_for_user(user_id=user_id, opportunity_entry=opportunity)
-    analysis_id = prepared.get("analysis_id") or opportunity.get("analysis_id")
+    analysis_id = prepared.get("analysis_id") or analysis_id
     proposal = prepared.get("proposal")
     status = prepared.get("status")
     confirmation_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(minutes=CONFIRMATION_TTL_MINUTES)
 
-    if status == "RECOMMEND_ONLY" or not proposal:
+    if status == RECOMMEND_ONLY or not proposal:
         record_status = RECOMMEND_ONLY
     else:
         record_status = PENDING
@@ -109,11 +197,12 @@ def create_confirmation(user_id: str, opportunity: dict) -> dict:
         "confirmation_id": confirmation_id,
         "analysis_id": analysis_id,
         "user_id": user_id,
-        "symbol": opportunity.get("symbol") or (proposal or {}).get("ticker") or (proposal or {}).get("underlying"),
+        "symbol": opportunity.get("symbol") or (proposal or {}).get("symbol") or (proposal or {}).get("ticker") or (proposal or {}).get("underlying"),
         "decision": str(opportunity.get("decision") or (proposal or {}).get("decision") or (proposal or {}).get("action") or "").upper(),
-        "kind": str(opportunity.get("kind") or opportunity.get("decision") or "BUY").upper(),
+        "kind": kind,
         "mode": CONFIRMATION_MODE,
         "status": record_status,
+        "execution_target": prepared.get("execution_target") or (proposal or {}).get("execution_target"),
         "confidence": prepared.get("confidence") or opportunity.get("confidence"),
         "risk_level": prepared.get("risk_level") or opportunity.get("risk_level"),
         "spot_price": prepared.get("spot_price") or opportunity.get("spot_price"),
@@ -170,21 +259,18 @@ def reject_confirmation(user_id: str, confirmation_id: str) -> dict:
     return result
 
 
-def _mark_expired(ref, data: dict) -> dict:
-    now = now_iso()
-    updates = {"status": EXPIRED, "acted_at": now, "execution_status": EXPIRED, "error": "Confirmation expired."}
-    ref.update(updates)
-    data.update(updates)
-    return {"success": False, "status": EXPIRED, "error": "Confirmation expired.", "confirmation": public_confirmation(data), "http_status": 410}
-
-
 def _update_for_reconfirmation(ref, data: dict, execution: dict) -> dict:
-    current = execution.get("current") or {}
+    current = dict(execution.get("current") or {})
+    if current.get("previewed_price") is None and current.get("price") is not None:
+        current["previewed_price"] = current.get("price")
+
     proposal = deepcopy(data.get("proposal_snapshot") or {})
     selector = proposal.setdefault("selector", {})
     selector.update(current)
     if data.get("decision"):
         selector["decision"] = data.get("decision")
+    proposal["confirm_selector"] = dict(selector)
+
     version = int(data.get("proposal_version") or 1) + 1
     terms_hash = compute_terms_hash(proposal)
     now = now_iso()
@@ -208,6 +294,14 @@ def _update_for_reconfirmation(ref, data: dict, execution: dict) -> dict:
 
 
 def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: int = None, terms_hash: str = None) -> dict:
+    if proposal_version is None or not terms_hash:
+        return {"success": False, "status": "INVALID_REQUEST", "error": "proposal_version and terms_hash are required.", "http_status": 400}
+
+    try:
+        requested_version = int(proposal_version)
+    except (TypeError, ValueError):
+        return {"success": False, "status": "INVALID_REQUEST", "error": "proposal_version must be an integer.", "http_status": 400}
+
     ref = confirmation_ref(user_id, confirmation_id)
     transaction = db.transaction()
 
@@ -228,9 +322,9 @@ def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: i
             txn.update(ref, updates)
             data.update(updates)
             return data, {"success": False, "status": EXPIRED, "error": "Confirmation expired.", "confirmation": public_confirmation(data), "http_status": 410}
-        if proposal_version is not None and int(proposal_version) != int(data.get("proposal_version") or 1):
+        if requested_version != int(data.get("proposal_version") or 1):
             return data, {"success": False, "status": "STALE_TERMS", "error": "Confirmation terms changed. Refresh before confirming.", "confirmation": public_confirmation(data), "http_status": 409}
-        if terms_hash is not None and terms_hash != data.get("terms_hash"):
+        if terms_hash != data.get("terms_hash"):
             return data, {"success": False, "status": "STALE_TERMS", "error": "Confirmation terms changed. Refresh before confirming.", "confirmation": public_confirmation(data), "http_status": 409}
         now = now_iso()
         updates = {"status": EXECUTING, "acted_at": now, "confirmed_at": now, "execution_started_at": now, "execution_status": EXECUTING}
@@ -246,7 +340,7 @@ def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: i
     if not proposal:
         return mark_confirmation_failed(user_id, confirmation_id, "No proposal snapshot is available.", data=data)
 
-    execution = execute_trade_proposal(proposal, action="CONFIRMATION_LINK", user_id=user_id)
+    execution = execute_prepared_proposal(user_id=user_id, proposal=proposal, action="CONFIRMATION_LINK")
     status = execution.get("status") or (EXECUTED if execution.get("ok") else FAILED)
 
     if status == NEEDS_RECONFIRMATION:
@@ -255,8 +349,12 @@ def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: i
         final_status = STALE
         success = False
         http_status = 409
+    elif status == RECOMMEND_ONLY:
+        final_status = RECOMMEND_ONLY
+        success = False
+        http_status = 409
     elif execution.get("ok"):
-        final_status = status if status == "DRY_RUN_OK" else EXECUTED
+        final_status = DRY_RUN_OK if status == DRY_RUN_OK else EXECUTED
         success = True
         http_status = 200
     else:

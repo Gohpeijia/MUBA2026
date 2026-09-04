@@ -1,0 +1,78 @@
+.trade-confirm-popup {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1200;
+  width: min(360px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  padding: 14px 44px 14px 14px;
+  border: 1px solid #d7e3df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #19312d;
+  box-shadow: 0 16px 42px rgba(15, 34, 31, 0.18);
+}
+
+.trade-confirm-popup__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #687c78;
+  cursor: pointer;
+}
+
+.trade-confirm-popup__close:hover {
+  background: #edf4f2;
+}
+
+.trade-confirm-popup__icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #eaf5f0;
+  color: #187055;
+}
+
+.trade-confirm-popup__content strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.trade-confirm-popup__content p {
+  margin: 4px 0 10px;
+  color: #526561;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.trade-confirm-popup__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: #176b58;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trade-confirm-popup__action:hover {
+  background: #105140;
+}

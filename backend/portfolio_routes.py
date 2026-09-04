@@ -7,7 +7,8 @@ from finnhub_service import (
     get_company_fundamentals,
     get_historical_candles,
 )
-from Risk_sizing import check_risk_limits
+from Risk_sizing import calculate_position_size, check_risk_limits
+from services.portfolio_service import normalize_symbol, sync_portfolio_summary
 import os
 import time
 import requests
@@ -225,11 +226,14 @@ def get_portfolio():
         # Enrich each holding with live price + change data
         enriched = []
         for item in portfolio:
-            ticker = item.get('sticker', '')
+            ticker = normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker'))
             quote  = get_rich_market_quote(ticker) if ticker else None
 
             enriched.append({
                 **item,
+                "symbol":         ticker,
+                "ticker":         ticker,
+                "sticker":        ticker,
                 "currentPrice":   quote["price"]         if quote else None,
                 "change":         quote["change"]         if quote else None,
                 "changePercent":  quote["changePercent"]  if quote else None,
@@ -257,31 +261,29 @@ def get_portfolio():
 @require_auth
 def buy_stock():
     try:
-        data           = request.json
+        data = request.get_json(silent=True) or {}
         secure_user_id = g.uid
-        sticker        = data.get('sticker', '').upper()
-        name           = data.get('name', '').strip()
+        symbol = normalize_symbol(data.get('symbol') or data.get('ticker') or data.get('sticker'))
+        sticker = symbol
+        name = str(data.get('name') or symbol).strip()
 
         try:
             shares = int(data.get('shares', 0))
-        except ValueError:
+        except (TypeError, ValueError):
             return jsonify({"success": False, "error": "Shares must be a valid number"}), 400
 
-        # Price paid per share for THIS transaction — required for the trade
-        # log's cost-basis math (the aggregated `portfolio` array below has
-        # no per-transaction price, only a running share count).
         try:
             price = float(data.get('price', 0.0))
-        except ValueError:
+        except (TypeError, ValueError):
             return jsonify({"success": False, "error": "Price must be a valid number"}), 400
 
-        reason    = data.get('reason', '').strip()
-        fields    = data.get('fields', {})
-        chart     = data.get('chart', {})
+        reason = str(data.get('reason') or '').strip()
+        fields = data.get('fields', {}) if isinstance(data.get('fields', {}), dict) else {}
+        chart = data.get('chart', {}) if isinstance(data.get('chart', {}), dict) else {}
         watchlist = bool(data.get('watchlist', False))
 
         if not sticker or shares <= 0:
-            return jsonify({"success": False, "error": "Sticker is required and shares must be > 0."}), 400
+            return jsonify({"success": False, "error": "Symbol is required and shares must be > 0."}), 400
         if price <= 0:
             return jsonify({"success": False, "error": "Price is required and must be > 0."}), 400
 
@@ -291,85 +293,147 @@ def buy_stock():
         if not user_doc.exists:
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        user_data = user_doc.to_dict()
+        user_data = user_doc.to_dict() or {}
         portfolio = user_data.get('portfolio', [])
-        
-        # ── START: DOUBLE-GATE RISK CHECK ──────────────────────────────
-        preferences = user_data.get('preference', {})
-        risk_tolerance = preferences.get('riskTolerance', 'Moderate')
-        total_portfolio_value = float(data.get('totalPortfolioValue', 0.0))
-        
-        # Calculate existing exposure for this specific ticker
-        existing_shares = 0
-        for item in portfolio:
-            if item.get('sticker') == sticker:
-                existing_shares = item.get('shares', 0)
-                break
-                
-        existing_exposure = existing_shares * price
-        proposed_investment = shares * price
-        
-        # Run the mathematical gate
-        risk_check = check_risk_limits(
-            portfolio_value = total_portfolio_value,
-            proposed_investment_amount = proposed_investment,
-            existing_exposure_value = existing_exposure,
-            risk_tolerance = risk_tolerance,
-            open_ai_risk_value = 0.0  # Optional: Update if you track total open risk across all positions
-        )
-        
-        if not risk_check["is_approved"]:
-            return jsonify({
-                "success": False, 
-                "error": f"Trade rejected by risk management: {risk_check['reason']}"
-            }), 403
-        # ── END: DOUBLE-GATE RISK CHECK ────────────────────────────────
+        if not isinstance(portfolio, list):
+            portfolio = []
 
-        # If approved, proceed with the original portfolio update logic
+        preferences = user_data.get('preference', {}) if isinstance(user_data.get('preference', {}), dict) else {}
+        risk_tolerance = preferences.get('riskTolerance', 'Moderate')
+        portfolio_state = sync_portfolio_summary(secure_user_id, user_data)
+
+        raw_total_value = data.get(
+            'totalPortfolioValue',
+            user_data.get('totalPortfolioValue', portfolio_state.get('total_value', 0.0)),
+        )
+        try:
+            total_portfolio_value = float(raw_total_value or 0.0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "totalPortfolioValue must be a valid number"}), 400
+
+        if total_portfolio_value <= 0:
+            total_portfolio_value = float(portfolio_state.get('total_value', 0.0) or 0.0)
+
+        if total_portfolio_value <= 0:
+            return jsonify({
+                "success": False,
+                "error": "Portfolio value is required for risk management.",
+            }), 400
+
+        existing_shares = 0.0
+        for item in portfolio:
+            item_symbol = normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker')) if isinstance(item, dict) else ''
+            if item_symbol == sticker:
+                existing_shares = float(item.get('shares', item.get('quantity', 0.0)) or 0.0)
+                break
+
+        sizing = calculate_position_size(
+            portfolio_value=total_portfolio_value,
+            entry_price=price,
+            risk_tolerance=risk_tolerance,
+            existing_exposure_value=existing_shares * price,
+            open_ai_risk_value=float(portfolio_state.get('open_ai_risk_value', 0.0) or 0.0),
+            direction='BUY',
+        )
+
+        max_allowed_shares = int(sizing.get('recommended_shares') or 0)
+        if shares > max_allowed_shares:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "Trade rejected by risk management: "
+                    f"requested {shares} share(s), but risk sizing allows {max_allowed_shares}."
+                ),
+                "risk_sizing": sizing,
+            }), 403
+
+        proposed_value = shares * price
+        proposal_for_gate = {
+            **sizing,
+            "recommended_shares": shares,
+            "position_value": round(proposed_value, 2),
+            "position_pct_of_portfolio": round((proposed_value / total_portfolio_value) * 100, 2),
+            "passes_risk_limits": shares > 0,
+        }
+        risk_ok, risk_reason = check_risk_limits(
+            portfolio_value=total_portfolio_value,
+            proposal=proposal_for_gate,
+        )
+
+        if not risk_ok:
+            return jsonify({
+                "success": False,
+                "error": f"Trade rejected by risk management: {risk_reason}",
+                "risk_sizing": proposal_for_gate,
+            }), 403
+
         stock_found = False
 
         for item in portfolio:
-            if item.get('sticker') == sticker:
-                item['shares']    += shares
-                item['shares']    += shares
-                item['name']       = name
-                item['fields']     = fields
-                item['chart']      = chart
-                item['watchlist']  = watchlist
-                stock_found        = True
+            if not isinstance(item, dict):
+                continue
+            item_symbol = normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker'))
+            if item_symbol == sticker:
+                old_shares = float(item.get('shares', item.get('quantity', 0.0)) or 0.0)
+                old_cost = float(item.get('averageCost', item.get('average_cost', price)) or price)
+                new_shares = old_shares + shares
+                average_cost = ((old_shares * old_cost) + (shares * price)) / new_shares if new_shares > 0 else price
+                item['symbol'] = sticker
+                item['ticker'] = sticker
+                item['sticker'] = sticker
+                item['shares'] = new_shares
+                item['quantity'] = new_shares
+                item['averageCost'] = round(average_cost, 4)
+                item['average_cost'] = round(average_cost, 4)
+                item['name'] = name
+                item['fields'] = fields
+                item['chart'] = chart
+                item['watchlist'] = watchlist
+                stock_found = True
                 break
 
         if not stock_found:
             portfolio.append({
-                "sticker":   sticker,
-                "name":      name,
-                "shares":    shares,
-                "fields":    fields,
-                "chart":     chart,
+                "symbol": sticker,
+                "ticker": sticker,
+                "sticker": sticker,
+                "name": name,
+                "shares": shares,
+                "quantity": shares,
+                "averageCost": price,
+                "average_cost": price,
+                "assetType": "EQUITY",
+                "asset_type": "EQUITY",
+                "fields": fields,
+                "chart": chart,
                 "watchlist": watchlist,
             })
 
         update_payload = {"portfolio": portfolio}
         if 'totalPortfolioValue' in data:
-            update_payload["totalPortfolioValue"] = float(data.get('totalPortfolioValue', 0.0))
+            update_payload["totalPortfolioValue"] = total_portfolio_value
 
         user_ref.update(update_payload)
+        sync_portfolio_summary(secure_user_id)
 
         _record_trade(
-            user_id      = secure_user_id,
-            ticker       = sticker,
-            action       = 'buy',
-            quantity     = shares,
-            price        = price,
-            company_name = name,
-            reason       = reason,
+            user_id=secure_user_id,
+            ticker=sticker,
+            action='buy',
+            quantity=shares,
+            price=price,
+            company_name=name,
+            reason=reason,
         )
 
-        return jsonify({"success": True, "message": f"Successfully updated portfolio for {sticker}!"})
+        return jsonify({
+            "success": True,
+            "message": f"Successfully updated portfolio for {sticker}!",
+            "risk_sizing": proposal_for_gate,
+        })
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  POST /sell  —  reduce (or close) a holding + log the trade
@@ -379,24 +443,25 @@ def buy_stock():
 @require_auth
 def sell_stock():
     try:
-        data           = request.json
+        data = request.get_json(silent=True) or {}
         secure_user_id = g.uid
-        sticker        = data.get('sticker', '').upper()
+        symbol = normalize_symbol(data.get('symbol') or data.get('ticker') or data.get('sticker'))
+        sticker = symbol
 
         try:
             shares = int(data.get('shares', 0))
-        except ValueError:
+        except (TypeError, ValueError):
             return jsonify({"success": False, "error": "Shares must be a valid number"}), 400
 
         try:
             price = float(data.get('price', 0.0))
-        except ValueError:
+        except (TypeError, ValueError):
             return jsonify({"success": False, "error": "Price must be a valid number"}), 400
 
-        reason = data.get('reason', '').strip()
+        reason = str(data.get('reason') or '').strip()
 
         if not sticker or shares <= 0:
-            return jsonify({"success": False, "error": "Sticker is required and shares must be > 0."}), 400
+            return jsonify({"success": False, "error": "Symbol is required and shares must be > 0."}), 400
         if price <= 0:
             return jsonify({"success": False, "error": "Price is required and must be > 0."}), 400
 
@@ -406,43 +471,63 @@ def sell_stock():
         if not user_doc.exists:
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        portfolio   = user_doc.to_dict().get('portfolio', [])
-        holding     = next((item for item in portfolio if item.get('sticker') == sticker), None)
+        portfolio = user_doc.to_dict().get('portfolio', [])
+        if not isinstance(portfolio, list):
+            portfolio = []
 
-        if holding is None or holding.get('shares', 0) <= 0:
+        holding = next(
+            (
+                item for item in portfolio
+                if isinstance(item, dict)
+                and normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker')) == sticker
+            ),
+            None,
+        )
+
+        if holding is None or float(holding.get('shares', holding.get('quantity', 0.0)) or 0.0) <= 0:
             return jsonify({"success": False, "error": f"You don't hold any {sticker} to sell."}), 400
 
-        if shares > holding.get('shares', 0):
+        held_shares = float(holding.get('shares', holding.get('quantity', 0.0)) or 0.0)
+        if shares > held_shares:
             return jsonify({
                 "success": False,
-                "error": f"You only hold {holding.get('shares', 0)} shares of {sticker}."
+                "error": f"You only hold {held_shares:g} shares of {sticker}."
             }), 400
 
         company_name = holding.get('name', sticker)
-        holding['shares'] -= shares
+        remaining_shares = held_shares - shares
+        holding['symbol'] = sticker
+        holding['ticker'] = sticker
+        holding['sticker'] = sticker
+        holding['shares'] = remaining_shares
+        holding['quantity'] = remaining_shares
 
-        # Drop the holding entirely once it's fully sold, rather than
-        # leaving a zero-share entry sitting in the portfolio array.
-        if holding['shares'] <= 0:
-            portfolio = [item for item in portfolio if item.get('sticker') != sticker]
+        if remaining_shares <= 0:
+            portfolio = [
+                item for item in portfolio
+                if not (
+                    isinstance(item, dict)
+                    and normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker')) == sticker
+                )
+            ]
 
         user_ref.update({"portfolio": portfolio})
+        sync_portfolio_summary(secure_user_id)
 
         _record_trade(
-            user_id      = secure_user_id,
-            ticker       = sticker,
-            action       = 'sell',
-            quantity     = shares,
-            price        = price,
-            company_name = company_name,
-            reason       = reason,
+            user_id=secure_user_id,
+            ticker=sticker,
+            action='sell',
+            quantity=shares,
+            price=price,
+            company_name=company_name,
+            reason=reason,
         )
 
         return jsonify({"success": True, "message": f"Successfully sold {shares} share(s) of {sticker}!"})
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  GET /trades  —  flat trade log for InvestmentDashboard.jsx

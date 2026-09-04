@@ -422,6 +422,7 @@ def build_trade_proposal(
     portfolio: dict,
     trader,         # ThetanutsTrader instance
     spot_price: float = None,
+    explicit_user_action: str = None,
 ) -> dict:
     """
     Main entry point. Called from ai_agent.py after the committee decision.
@@ -462,7 +463,7 @@ def build_trade_proposal(
         )
 
     # ── 2. Low confidence guard ─────────────────────────────────────────
-    if confidence < 0.55:
+    if confidence < 0.55 and not explicit_user_action:
         return _recommend_only(
             f"Evidence conviction is only {int(confidence * 100)}% — below the 55% "
             f"threshold required to generate an executable trade proposal. "

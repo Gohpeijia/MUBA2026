@@ -129,15 +129,14 @@ class AIAgent:
 
     def process(
         self,
-        user_input:         str,
-        ticker:             str  = None,
-        chat_history:       list = None,
-        page_context:       str = "Unknown",
-        preferences:        dict = None,
+        user_input: str,
+        ticker: str = None,
+        chat_history: list = None,
+        page_context: str = "Unknown",
+        preferences: dict = None,
         previous_consensus: dict = None,
-        user_goal:          dict = None,
-        portfolio:          dict = None,
-        requested_action:   str = None,
+        user_goal: dict = None,
+        portfolio: dict = None,
     ):
         # ── 1. INTELLIGENT ASSET RESOLUTION ──────────────────────────────────
         # Resolves queries with typos (e.g. "NASDAS 100"), aliases ("NDX", "US100", "Gold"),
@@ -179,15 +178,29 @@ class AIAgent:
         
                 # ── EXPLICIT USER BUY ───────────────────────────────────────
                 # Local testing: explicit "buy ..." overrides committee decision.
-                if requested_action == "BUY":
-                    print(
-                        f"🧪 [AIAgent] Explicit BUY request detected — "
-                        f"overriding committee decision "
-                        f"{investment_analysis.get('decision', 'HOLD')} -> BUY"
-                    )
-                    investment_analysis["decision"] = "BUY"
+                
         
-                decision = investment_analysis.get("decision", "HOLD")
+                # AI's independent recommendation
+                ai_decision = investment_analysis.get("decision", "HOLD")
+
+                # User's explicit trading intent
+                user_text = (user_input or "").strip().lower()
+                explicit_action = None
+
+                if re.search(r"\b(buy|purchase)\b", user_text):
+                    explicit_action = "BUY"
+                elif re.search(r"\b(sell|dispose)\b", user_text):
+                    explicit_action = "SELL"
+
+                # User's explicit BUY/SELL command controls the trade direction.
+                # AI recommendation is advisory only.
+                trade_decision = explicit_action or ai_decision
+
+                print(
+                    f"🎯 [AIAgent] User intent: {explicit_action or 'NONE'} | "
+                    f"AI assessment: {ai_decision} | "
+                    f"Trade decision: {trade_decision}"
+                )
                 conf_pct = int(
                     investment_analysis.get("confidence", 0.5) * 100
                 )
@@ -201,11 +214,19 @@ class AIAgent:
                     f"{canonical_name} ({sym})\n\n"
                 )
         
-                summary_md += (
-                    f"**Committee Decision:** `{decision}` "
-                    f"(Evidence Conviction: **{conf_pct}%**) · "
-                    f"Risk Level: **{risk_lvl}**\n\n"
-                )
+                if explicit_action:
+                    summary_md += (
+                        f"**Your Requested Action:** `{explicit_action}`\n\n"
+                        f"**AI Assessment:** `{ai_decision}` "
+                        f"(Evidence Conviction: **{conf_pct}%**) · "
+                        f"Risk Level: **{risk_lvl}**\n\n"
+                    )
+                else:
+                    summary_md += (
+                        f"**Committee Decision:** `{ai_decision}` "
+                        f"(Evidence Conviction: **{conf_pct}%**) · "
+                        f"Risk Level: **{risk_lvl}**\n\n"
+                    )
         
                 summary_md += f"{summary}\n\n"
         
@@ -223,12 +244,13 @@ class AIAgent:
                 # ── Build trade proposal ────────────────────────────────────
                 trade_result = build_trade_proposal(
                     symbol=sym,
-                    decision=decision,
+                    decision=trade_decision,
                     investment_analysis=investment_analysis,
                     preferences=preferences or {},
                     portfolio=portfolio or {},
                     trader=trader,
                     spot_price=spot_price,
+                    explicit_user_action=explicit_action,
                 )
         
                 # Append trade status
@@ -242,7 +264,7 @@ class AIAgent:
                         f"Collateral: `{prop['collateral_usdc']} USDC`"
                     )
         
-                elif decision in ("BUY", "SELL"):
+                elif trade_decision in ("BUY", "SELL"):
                     summary_md += (
                         f"\n\n---\n"
                         f"⚠️ **Trade Note:** {trade_result['reason']}"

@@ -114,6 +114,13 @@
   border-radius: 99px;
 }
 
+/* ── Trade confirmation inside chat ── */
+
+.trade-confirmation-message {
+  width: 100%;
+  flex-shrink: 0;
+}
+
 /* ── Message Row ── */
 .message-row {
   display: flex;

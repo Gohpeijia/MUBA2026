@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from firebase_config import db
 from services.opportunity_prepare_service import get_user_preferences
 from services.trade_confirmation_service import create_confirmation, mark_confirmation_notified
-from services.trade_execution_service import execute_trade_proposal
+from services.execution_service import execute_prepared_proposal
 from services.notification_service import (
     notify_alert_only,
     notify_confirmation_required,
@@ -150,7 +150,7 @@ def process_opportunity_for_user(opportunity: dict, user_id: str) -> dict:
             result = {"ok": False, "status": prepared.get("status") or "RECOMMEND_ONLY", "error": prepared.get("reason") or prepared.get("error")}
         else:
             save_action_status(user_id, opportunity, mode=mode, status="executing")
-            result = execute_trade_proposal(proposal, action="AUTO_OPPORTUNITY", user_id=user_id)
+            result = execute_prepared_proposal(user_id=user_id, proposal=proposal, action="AUTO_OPPORTUNITY")
         logger.info(
             "Auto opportunity execution result: user=%s analysis_id=%s ok=%s status=%s error=%s reason=%s",
             user_id,

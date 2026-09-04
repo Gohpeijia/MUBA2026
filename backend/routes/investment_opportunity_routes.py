@@ -42,6 +42,7 @@ from investment.sell_scanner import (
 )
 
 from services.opportunity_prepare_service import prepare_opportunity_for_user
+from services.portfolio_service import get_portfolio_state, user_holds_symbol
 from services.trade_confirmation_service import (
     get_confirmation,
     confirm_confirmation,
@@ -467,7 +468,7 @@ def prepare_trade(analysis_id):
     user_id = g.uid
 
     preferences = _get_user_preferences(user_id)
-    portfolio = _get_user_portfolio(user_id)
+    portfolio = get_portfolio_state(user_id)
 
     # ── 3b. SELL-specific ownership guard ───────────────────────────────────
     #
@@ -476,7 +477,7 @@ def prepare_trade(analysis_id):
     # route doesn't take that on faith — it re-checks against the user's
     # own live portfolio before ever building a proposal.
 
-    if kind == "SELL" and not _user_holds_symbol(portfolio, symbol):
+    if kind == "SELL" and not user_holds_symbol(portfolio, symbol):
         logger.info(
             "Blocked SELL prepare for %s: user %s does not hold %s",
             analysis_id,

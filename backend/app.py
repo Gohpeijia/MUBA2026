@@ -24,6 +24,7 @@ from ai_routes import ai_bp
 from wallet_routes import wallet_bp
 from investment_routes import investment_bp
 from routes.investment_opportunity_routes import opportunities_bp
+from routes.notification_routes import notifications_bp
 from investment.scheduler import init_scheduler
 
 
@@ -53,6 +54,7 @@ app.register_blueprint(ai_bp, url_prefix='/api/aiagent/ai')
 app.register_blueprint(wallet_bp, url_prefix='/api/wallet')
 app.register_blueprint(investment_bp, url_prefix='/api/investment')
 app.register_blueprint(opportunities_bp)
+app.register_blueprint(notifications_bp)
 
 
 @app.route('/', methods=['GET'])

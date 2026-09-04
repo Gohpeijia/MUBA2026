@@ -26,7 +26,7 @@ import {
   FaDatabase
 } from 'react-icons/fa';
 
-export default function InvestmentIntelligenceCard({ data }) {
+export default function InvestmentIntelligenceCard({ data, tradeStatus, tradeReason, tradeProposal }) {
   if (!data) return null;
 
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'chart' | 'cases' | 'risks' | 'agents' | 'data'
@@ -57,8 +57,15 @@ export default function InvestmentIntelligenceCard({ data }) {
   } = data;
 
   const confidencePct = Math.round(confidence * 100);
-
+  const isExecutable =
+    tradeStatus === 'EXECUTABLE' &&
+    !!tradeProposal;
   // Decision badge colors
+  const displayedDecision =
+  isExecutable && tradeProposal?.decision
+    ? tradeProposal.decision
+    : decision;
+
   const getDecisionTheme = (dec) => {
     switch (dec?.toUpperCase()) {
       case 'BUY':
@@ -88,8 +95,20 @@ export default function InvestmentIntelligenceCard({ data }) {
     }
   };
 
-  const decisionTheme = getDecisionTheme(decision);
+  const decisionTheme = getDecisionTheme(displayedDecision);
   const riskTheme = getRiskTheme(risk_level);
+
+  const displayDecisionClass = isExecutable
+    ? decisionTheme.class
+    : 'decision--not-executable';
+
+  const displayDecisionIcon = isExecutable
+    ? decisionTheme.icon
+    : '⚪';
+
+  const displayDecisionLabel = isExecutable
+    ? decisionTheme.label
+    : `${decisionTheme.label} — NOT EXECUTABLE`;
 
   return (
     <div className="intel-card">
@@ -116,9 +135,9 @@ export default function InvestmentIntelligenceCard({ data }) {
 
         {/* ── VERDICT BANNER ── */}
         <div className="intel-card__verdict-banner">
-          <div className={`intel-card__decision-pill ${decisionTheme.class}`}>
-            <span className="decision-pill__icon">{decisionTheme.icon}</span>
-            <span className="decision-pill__label">{decisionTheme.label}</span>
+          <div className={`intel-card__decision-pill ${displayDecisionClass}`}>
+            <span className="decision-pill__icon">{displayDecisionIcon}</span>
+            <span className="decision-pill__label">{displayDecisionLabel}</span>
           </div>
 
           <div className="intel-card__confidence-box">
@@ -141,6 +160,19 @@ export default function InvestmentIntelligenceCard({ data }) {
             <FaShieldAlt size={12} />
             <span>{riskTheme.label}</span>
           </div>
+
+          {isExecutable ? (
+          <div className="intel-card__execution-status execution-status--ready">
+            <FaCheckCircle size={12} />
+            <span>Trade ready for confirmation</span>
+          </div>
+        ) : tradeStatus === 'RECOMMEND_ONLY' ? (
+          <div className="intel-card__execution-status execution-status--blocked">
+            <FaInfoCircle size={12} />
+            <span>{tradeReason || 'Analysis only — no executable trade proposal.'}</span>
+          </div>
+        ) : null}
+
         </div>
       </div>
 

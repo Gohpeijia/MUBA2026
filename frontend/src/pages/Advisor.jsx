@@ -23,8 +23,8 @@ export default function Advisor() {
 
   /* ── Auto-scroll ── */
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+}, [messages, loading, pendingTrade]);
 
   /* ── Auto-resize textarea ── */
   useEffect(() => {
@@ -94,7 +94,7 @@ export default function Advisor() {
       </div>
 
       {/* Latest trade proposal + on-chain execution result. */}
-      <TradeResultCard trade={pendingTrade} onDismiss={clearPendingTrade} />
+      
 
       {/* Chat Window */}
       <div className="chat-window">
@@ -143,7 +143,12 @@ export default function Advisor() {
 
                   {msg.investmentAnalysis && (
                     <div style={{ marginTop: '0.75rem' }}>
-                      <InvestmentIntelligenceCard data={msg.investmentAnalysis} />
+                      <InvestmentIntelligenceCard
+                        data={msg.investmentAnalysis}
+                        tradeStatus={msg.tradeStatus}
+                        tradeReason={msg.tradeReason}
+                        tradeProposal={msg.tradeProposal}
+                      />
                     </div>
                   )}
                 </div>
@@ -153,12 +158,13 @@ export default function Advisor() {
             </div>
           </div>
         ))}
-
+      
         {loading && (
           <div className="message-row message-row--assistant">
             <div className="avatar avatar--assistant">
               <FaRobot size={16} />
             </div>
+        
             <div className="bubble bubble--assistant bubble--typing">
               <span className="typing-dot" />
               <span className="typing-dot" />
@@ -166,7 +172,17 @@ export default function Advisor() {
             </div>
           </div>
         )}
-
+      
+        {/* Pending trade belongs to the conversation */}
+        {pendingTrade && (
+          <div className="trade-confirmation-message">
+            <TradeResultCard
+              trade={pendingTrade}
+              onDismiss={clearPendingTrade}
+            />
+          </div>
+        )}
+      
         <div ref={chatEndRef} />
       </div>
 

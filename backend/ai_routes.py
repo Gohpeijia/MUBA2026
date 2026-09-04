@@ -2,6 +2,8 @@
 from flask import Blueprint, request, jsonify, g
 from ai_agent import AIAgent, trader, _log_thetanuts_trade, FORCE_DRY_RUN
 from trading.validator import validate_confirmation
+from services.execution_service import execute_prepared_proposal
+from services.portfolio_service import get_portfolio_state
 from firebase_config import db
 from security import require_auth
 from datetime import datetime
@@ -379,17 +381,9 @@ def chat_with_agent():
         # 1. Fetch user metadata profile context
         user_doc = db.collection("users").document(user_id).get()
         user_data = user_doc.to_dict() if user_doc.exists else {}
-        preferences  = _get_preferences(user_id)
-        tabung_goal  = user_data.get("tabung_goal", None)
-
-        # ── START NEW: Fetch Portfolio Data ──
-        portfolio_doc = db.collection("users").document(user_id).collection("portfolio").document("summary").get()
-        portfolio_data = portfolio_doc.to_dict() if portfolio_doc.exists else {
-            "total_value": 0.0,
-            "positions": {},
-            "open_ai_risk_value": 0.0
-        }
-        # ── END NEW ──
+        preferences = _get_preferences(user_id)
+        tabung_goal = user_data.get("tabung_goal", None)
+        portfolio_data = get_portfolio_state(user_id)
 
         # 2. Extract chat history directly from frontend payload instead of Firestore
         chat_history = data.get('chat_history', [])
@@ -398,10 +392,9 @@ def chat_with_agent():
         if len(chat_history) > 20:
             chat_history = chat_history[-20:]
 
-        requested_action = None
+        
 
-        if user_message.strip().lower().startswith("buy "):
-            requested_action = "BUY"
+        
 
         # 3. Run the AI agent
         result = agent.process(
@@ -412,24 +405,11 @@ def chat_with_agent():
             preferences  = preferences,
             user_goal    = tabung_goal,
             portfolio    = portfolio_data,
-            requested_action = requested_action,
         )
         # LOCAL TEST: explicit user BUY command forces BUY execution.
         # The AI analysis can still say HOLD/SELL, but an explicit "buy ..."
         # command is treated as the user's requested trade action.
-        if user_message.strip().lower().startswith("buy "):
-            trade_proposal = result.get("trade_proposal")
-
-            if trade_proposal:
-                trade_proposal["decision"] = "BUY"
-
-                selector = trade_proposal.get("selector")
-                if isinstance(selector, dict):
-                    selector["decision"] = "BUY"
-
-                result["trade_status"] = "EXECUTABLE"
-                result["trade_proposal"] = trade_proposal
-                result["trade_reason"] = "User explicitly requested BUY."
+        
 
         if result.get("status") == "ERROR":
             return jsonify({"success": False, "error": result["final_advice"]}), 503
@@ -445,7 +425,7 @@ def chat_with_agent():
             proposal = result.get("trade_proposal")
 
             if copilot_mode == AUTOMATED_MODE and proposal:
-                auto_execution = _execute_automated_trade(proposal)
+                auto_execution = execute_prepared_proposal(user_id=user_id, proposal=proposal, action="AUTO_CHAT")
                 result["auto_execution"] = auto_execution
                 result["trade_proposal"] = None
                 result["trade_status"] = auto_execution.get("status", "FAILED")
@@ -616,12 +596,19 @@ def confirm_trade():
 
             if rolled_off:
                 replacement_order = orders["data"][0]
+                replacement_price = _order_field(
+                    replacement_order,
+                    "price_per_contract",
+                    "price",
+                    "premium",
+                    "unitPrice",
+                )
                 return jsonify({
                     "success": True,
                     "data": {
                         "status": "NEEDS_RECONFIRMATION",
                         "reason": (
-                            "That order rolled off the book — "
+                            "That order rolled off the book - "
                             "please review and confirm the current order."
                         ),
                         "previous": selector,
@@ -646,17 +633,13 @@ def confirm_trade():
                                 "expiration",
                                 "expirationTimestamp",
                             ),
-                            "price": _order_field(
-                                replacement_order,
-                                "price_per_contract",
-                                "price",
-                                "premium",
-                                "unitPrice",
-                            ),
+                            "price": replacement_price,
+                            "previewed_price": replacement_price,
+                            "decision": "BUY",
+                            "collateral_usdc": collateral_usdc,
                         },
                     },
                 })
-
             current_type = _order_field(
                 current_order,
                 "option_type",
@@ -709,7 +692,7 @@ def confirm_trade():
                 ):
                     pass
 
-            if material_change and not force:
+            if material_change:
                 return jsonify({
                     "success": True,
                     "data": {
@@ -729,6 +712,9 @@ def confirm_trade():
                             "strike": current_strike,
                             "expiry": current_expiry,
                             "price": current_price,
+                            "previewed_price": current_price,
+                            "decision": "BUY",
+                            "collateral_usdc": collateral_usdc,
                         },
                     },
                 })
@@ -1166,3 +1152,4 @@ def confirm_trade():
             "success": False,
             "error": "Could not confirm trade.",
         }), 500
+

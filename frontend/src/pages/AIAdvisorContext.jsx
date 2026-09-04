@@ -9,6 +9,28 @@ const INITIAL_MESSAGES = [
     content: "Hi, I'm your personal AI agent trader.",
   },
 ];
+function normalizeTradeProposal(proposal) {
+  if (!proposal) return null;
+
+  const selector = proposal.confirm_selector || proposal.selector || {};
+  const symbol = proposal.symbol || proposal.ticker || selector.underlying;
+  const action = (proposal.action || proposal.decision || selector.decision || '').toUpperCase();
+  const confirmSelector = {
+    ...selector,
+    underlying: selector.underlying || symbol,
+    decision: selector.decision || action,
+  };
+
+  return {
+    ...proposal,
+    symbol,
+    ticker: proposal.ticker || symbol,
+    action,
+    decision: proposal.decision || action,
+    selector: proposal.selector || confirmSelector,
+    confirm_selector: confirmSelector,
+  };
+}
 
 export function AIAdvisorProvider({ children }) {
   // 1. Initialize state directly from sessionStorage if it exists
@@ -128,7 +150,7 @@ export function AIAdvisorProvider({ children }) {
             ...prev.confirm_selector,
             strike: data.data.current.strike,
             expiry: data.data.current.expiry,
-            previewed_price: data.data.current.price,
+            previewed_price: data.data.current.previewed_price ?? data.data.current.price,
           },
         }));
       } else {
@@ -156,7 +178,8 @@ export function AIAdvisorProvider({ children }) {
       setHighlightedContext,
       pendingTrade,
       clearPendingTrade,
-      confirmTrade
+      confirmTrade,
+      setPendingTrade
     }}>
       {children}
     </AIAdvisorContext.Provider>
@@ -214,13 +237,26 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
           role: 'assistant',
           content: data.data.final_advice,
           investmentAnalysis: data.data.investment_analysis || null,
+          tradeStatus: data.data.trade_status || null,
+          tradeReason: data.data.trade_reason || null,
+          tradeProposal: data.data.trade_proposal || null,
         }]);
-      }
+}
       
       // Extract trade proposal when backend risk analysis outputs execution recommendation
-      if (data.data.trade_proposal) {
-        setPendingTrade(data.data.trade_proposal);
-      }
+      // Only create an actionable trade popup when the backend explicitly
+    // says the proposal is EXECUTABLE and a proposal exists.
+    const isExecutable =
+      data.data.trade_status === 'EXECUTABLE' &&
+      !!data.data.trade_proposal;
+        
+    if (isExecutable) {
+      setPendingTrade(normalizeTradeProposal(data.data.trade_proposal));
+    } else {
+      // Explicitly clear any stale pending trade when the new AI result
+      // is not executable.
+      setPendingTrade(null);
+    }
     } else {
       throw new Error("Invalid response format from server.");
     }
@@ -237,3 +273,4 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
 }
 
 export const useAIAdvisor = () => useContext(AIAdvisorContext);
+

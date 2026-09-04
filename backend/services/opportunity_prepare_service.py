@@ -4,6 +4,10 @@ from advisor.trade_bridge import build_trade_proposal
 from ai_agent import trader
 from firebase_config import db
 from investment.opportunity_engine import get_cached_entry
+from services.equity_execution_service import prepare_equity_proposal
+from services.execution_router import PAPER_EQUITY, THETANUTS_OPTION, UNSUPPORTED, resolve_execution_target
+from services.portfolio_service import get_portfolio_state, user_holds_symbol
+from services.trade_proposal_serializer import serialize_trade_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -19,51 +23,6 @@ def get_user_preferences(user_id: str) -> dict:
     except Exception:
         logger.exception("Failed to load preferences for user %s", user_id)
         return {}
-
-
-def get_user_portfolio(user_id: str) -> dict:
-    fallback = {
-        "total_value": 0.0,
-        "positions": {},
-        "open_ai_risk_value": 0.0,
-    }
-    try:
-        doc = (
-            db.collection("users")
-            .document(user_id)
-            .collection("portfolio")
-            .document("summary")
-            .get()
-        )
-        if doc.exists:
-            data = doc.to_dict() or {}
-            return data if isinstance(data, dict) else fallback
-    except Exception:
-        logger.exception("Failed to load portfolio for user %s", user_id)
-    return fallback
-
-
-def user_holds_symbol(portfolio: dict, symbol: str) -> bool:
-    positions = portfolio.get("positions", {}) if isinstance(portfolio, dict) else {}
-    if not isinstance(positions, dict):
-        return False
-
-    target = str(symbol or "").strip().upper()
-    if not target:
-        return False
-
-    for position_symbol, position in positions.items():
-        if str(position_symbol).strip().upper() != target:
-            continue
-        if isinstance(position, dict):
-            qty = position.get("quantity", position.get("qty"))
-        else:
-            qty = position
-        try:
-            return float(qty) > 0
-        except (TypeError, ValueError):
-            return False
-    return False
 
 
 def normalize_opportunity_entry(opportunity_entry: dict) -> dict | None:
@@ -87,7 +46,8 @@ def normalize_opportunity_entry(opportunity_entry: dict) -> dict | None:
 
     return {
         "analysis": analysis,
-        "symbol": opportunity_entry.get("symbol"),
+        "symbol": opportunity_entry.get("symbol") or analysis.get("symbol") or analysis.get("ticker"),
+        "asset_type": opportunity_entry.get("asset_type") or analysis.get("asset_type"),
         "decision": opportunity_entry.get("decision"),
         "confidence": opportunity_entry.get("confidence"),
         "spot_price": opportunity_entry.get("spot_price") or analysis.get("current_price"),
@@ -107,11 +67,12 @@ def prepare_opportunity_for_user(*, user_id: str, opportunity_entry: dict) -> di
         }
 
     analysis = entry.get("analysis") or {}
-    symbol = entry.get("symbol")
+    symbol = entry.get("symbol") or analysis.get("symbol") or analysis.get("ticker")
     decision = str(entry.get("decision") or "").upper()
-    spot_price = entry.get("spot_price")
+    spot_price = entry.get("spot_price") or analysis.get("current_price")
     kind = str(entry.get("kind") or decision or "BUY").upper()
     analysis_id = entry.get("analysis_id") or analysis.get("analysis_id")
+    asset_type = entry.get("asset_type") or analysis.get("asset_type")
 
     if decision not in ("BUY", "SELL"):
         return {
@@ -122,9 +83,25 @@ def prepare_opportunity_for_user(*, user_id: str, opportunity_entry: dict) -> di
         }
 
     preferences = get_user_preferences(user_id)
-    portfolio = get_user_portfolio(user_id)
+    portfolio = get_portfolio_state(user_id)
+    route = resolve_execution_target(symbol, asset_type)
+    execution_target = route.get("execution_target")
 
-    if kind == "SELL" and not user_holds_symbol(portfolio, symbol):
+    if execution_target == UNSUPPORTED:
+        return {
+            "analysis_id": analysis_id,
+            "status": "RECOMMEND_ONLY",
+            "reason": route.get("reason") or "No execution engine is configured for this asset.",
+            "proposal": None,
+            "analysis_snapshot": analysis,
+            "spot_price": spot_price,
+            "kind": kind,
+            "confidence": entry.get("confidence") or analysis.get("confidence"),
+            "risk_level": analysis.get("risk_level", entry.get("risk_level", "UNKNOWN")),
+            "execution_target": execution_target,
+        }
+
+    if kind == "SELL" and execution_target == PAPER_EQUITY and not user_holds_symbol(portfolio, route.get("symbol") or symbol):
         return {
             "analysis_id": analysis_id,
             "status": "RECOMMEND_ONLY",
@@ -133,15 +110,41 @@ def prepare_opportunity_for_user(*, user_id: str, opportunity_entry: dict) -> di
         }
 
     try:
-        trade_result = build_trade_proposal(
-            symbol=symbol,
-            decision=decision,
-            investment_analysis=analysis,
-            preferences=preferences,
-            portfolio=portfolio,
-            trader=trader,
-            spot_price=spot_price,
-        )
+        if execution_target == PAPER_EQUITY:
+            trade_result = prepare_equity_proposal(
+                user_id=user_id,
+                symbol=route.get("symbol") or symbol,
+                decision=decision,
+                investment_analysis=analysis,
+                preferences=preferences,
+                portfolio=portfolio,
+                spot_price=spot_price,
+            )
+        elif execution_target == THETANUTS_OPTION:
+            trade_result = build_trade_proposal(
+                symbol=route.get("underlying") or symbol,
+                decision=decision,
+                investment_analysis=analysis,
+                preferences=preferences,
+                portfolio=portfolio,
+                trader=trader,
+                spot_price=spot_price,
+            )
+            if isinstance(trade_result.get("proposal"), dict):
+                trade_result["proposal"] = serialize_trade_proposal(
+                    {
+                        **trade_result["proposal"],
+                        "execution_target": THETANUTS_OPTION,
+                        "source_symbol": symbol,
+                    },
+                    execution_target=THETANUTS_OPTION,
+                )
+        else:
+            trade_result = {
+                "status": "RECOMMEND_ONLY",
+                "reason": "No execution engine is configured for this asset.",
+                "proposal": None,
+            }
     except Exception as exc:
         logger.exception("Failed to prepare opportunity %s for user %s", analysis_id, user_id)
         return {
@@ -151,15 +154,21 @@ def prepare_opportunity_for_user(*, user_id: str, opportunity_entry: dict) -> di
             "proposal": None,
         }
 
+    proposal = serialize_trade_proposal(
+        trade_result.get("proposal"),
+        execution_target=execution_target if trade_result.get("proposal") else None,
+    )
+
     return {
         "analysis_id": analysis_id,
         "status": trade_result.get("status"),
         "reason": trade_result.get("reason"),
-        "proposal": trade_result.get("proposal"),
+        "proposal": proposal,
         "action_mode": trade_result.get("action_mode"),
         "analysis_snapshot": analysis,
         "spot_price": spot_price,
         "kind": kind,
         "confidence": entry.get("confidence") or analysis.get("confidence"),
         "risk_level": analysis.get("risk_level", entry.get("risk_level", "UNKNOWN")),
+        "execution_target": execution_target,
     }
