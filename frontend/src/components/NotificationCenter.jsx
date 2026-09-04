@@ -73,6 +73,12 @@ export default function NotificationCenter() {
   }, [checkPendingConfirmations]);
 
   useEffect(() => {
+    const handleCreatedConfirmation = (event) => showConfirmation(event.detail);
+    window.addEventListener('trade-confirmation:created', handleCreatedConfirmation);
+    return () => window.removeEventListener('trade-confirmation:created', handleCreatedConfirmation);
+  }, [showConfirmation]);
+
+  useEffect(() => {
     let unsubscribeMessages = () => {};
     let mounted = true;
 

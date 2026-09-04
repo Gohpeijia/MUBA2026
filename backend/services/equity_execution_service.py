@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from firebase_config import db
+from finnhub_service import get_rich_market_quote
 from Risk_sizing import calculate_position_size, check_risk_limits
 from services.execution_router import PAPER_EQUITY
 from services.portfolio_service import (
@@ -14,9 +15,11 @@ from services.portfolio_service import (
     sync_portfolio_summary,
 )
 from services.trade_proposal_serializer import serialize_trade_proposal
+from services.trade_quantity import select_sell_quantity
 
 logger = logging.getLogger(__name__)
 DEFAULT_PAPER_PORTFOLIO_VALUE = float(os.getenv("PAPER_PORTFOLIO_VALUE_USD", "10000"))
+MAX_CONFIRMATION_PRICE_DRIFT_PCT = float(os.getenv("EQUITY_PRICE_DRIFT_PCT", "0.03"))
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -170,6 +173,7 @@ def prepare_equity_proposal(
     preferences: dict | None,
     portfolio: dict | None = None,
     spot_price: Any = None,
+    requested_quantity: Any = None,
 ) -> dict:
     symbol = normalize_symbol(symbol)
     decision = str(decision or "").upper().strip()
@@ -185,10 +189,12 @@ def prepare_equity_proposal(
 
     if decision == "SELL":
         position = _position_for_symbol(portfolio, symbol)
-        quantity = int(_position_quantity(position))
-        if quantity <= 0:
+        held_shares = int(_position_quantity(position))
+        if held_shares <= 0:
             return {"status": "RECOMMEND_ONLY", "reason": f"You do not currently hold {symbol}.", "proposal": None}
-        shares = quantity
+        shares, quantity_source, quantity_error = select_sell_quantity(analysis, requested_quantity, held_shares)
+        if quantity_error:
+            return {"status": "RECOMMEND_ONLY", "reason": quantity_error, "proposal": None}
         risk = {}
     else:
         portfolio_value = _portfolio_value_for_paper_trading(portfolio)
@@ -220,6 +226,7 @@ def prepare_equity_proposal(
         "price": price,
         "shares": shares,
         "quantity": shares,
+        "quantity_source": quantity_source if decision == "SELL" else "AI_RECOMMENDED",
         "estimated_value": round(shares * price, 2),
         "confidence_pct": int((_to_float(analysis.get("confidence")) or 0.0) * 100),
         "risk_level": analysis.get("risk_level", "MEDIUM"),
@@ -352,6 +359,30 @@ def execute_equity_sell(user_id: str, proposal: dict, *, action: str = "CONFIRM"
         return {"ok": False, "status": "FAILED", "error": f"You do not hold any {symbol} to sell."}
     if shares > held_shares:
         return {"ok": False, "status": "FAILED", "error": f"You only hold {held_shares:g} share(s) of {symbol}."}
+
+    quote = get_rich_market_quote(symbol)
+    current_price = _to_float((quote or {}).get("price"))
+    if current_price <= 0:
+        return {"ok": False, "status": "FAILED", "error": f"A current market price for {symbol} is unavailable."}
+
+    drift = abs(current_price - price) / price if price else 0.0
+    if action == "CONFIRMATION_LINK" and drift > MAX_CONFIRMATION_PRICE_DRIFT_PCT:
+        return {
+            "ok": False,
+            "status": "NEEDS_RECONFIRMATION",
+            "reason": f"{symbol} moved {drift * 100:.2f}% since the preview. Review the updated sell price.",
+            "previous": {"price": price, "shares": shares, "quantity": shares},
+            "current": {
+                "price": current_price,
+                "shares": shares,
+                "quantity": shares,
+                "estimated_value": round(shares * current_price, 2),
+            },
+        }
+
+    # Automated orders use the latest quote. Confirmed orders use it once it
+    # remains within the accepted tolerance (or after reconfirmation).
+    price = current_price
 
     remaining = held_shares - shares
     if remaining <= 0:

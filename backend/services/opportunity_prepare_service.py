@@ -54,6 +54,7 @@ def normalize_opportunity_entry(opportunity_entry: dict) -> dict | None:
         "kind": opportunity_entry.get("kind", opportunity_entry.get("decision", "BUY")),
         "holder_user_ids": opportunity_entry.get("holder_user_ids", []),
         "analysis_id": analysis_id,
+        "requested_quantity": opportunity_entry.get("requested_quantity"),
     }
 
 
@@ -119,6 +120,7 @@ def prepare_opportunity_for_user(*, user_id: str, opportunity_entry: dict) -> di
                 preferences=preferences,
                 portfolio=portfolio,
                 spot_price=spot_price,
+                requested_quantity=entry.get("requested_quantity"),
             )
         elif execution_target == THETANUTS_OPTION:
             trade_result = build_trade_proposal(

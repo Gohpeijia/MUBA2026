@@ -16,6 +16,9 @@ from dotenv import load_dotenv
 from prompt_engine import TradingAdvisorPromptManager
 from agents.orchestrator import SwarmOrchestrator as SwarmSimulationEngine
 from services.asset_resolver import resolve_asset_from_query
+from services.equity_execution_service import prepare_equity_proposal
+from services.execution_router import PAPER_EQUITY, resolve_execution_target
+from services.trade_quantity import parse_explicit_trade_quantity
 from thetanuts_trader import ThetanutsTrader
 
 try:
@@ -137,6 +140,7 @@ class AIAgent:
         previous_consensus: dict = None,
         user_goal: dict = None,
         portfolio: dict = None,
+        user_id: str = None,
     ):
         # ── 1. INTELLIGENT ASSET RESOLUTION ──────────────────────────────────
         # Resolves queries with typos (e.g. "NASDAS 100"), aliases ("NDX", "US100", "Gold"),
@@ -195,6 +199,7 @@ class AIAgent:
                 # User's explicit BUY/SELL command controls the trade direction.
                 # AI recommendation is advisory only.
                 trade_decision = explicit_action or ai_decision
+                requested_quantity = parse_explicit_trade_quantity(user_input, explicit_action)
 
                 print(
                     f"🎯 [AIAgent] User intent: {explicit_action or 'NONE'} | "
@@ -241,28 +246,47 @@ class AIAgent:
                     "chart, and invalidation triggers in the research card below._"
                 )
         
-                # ── Build trade proposal ────────────────────────────────────
-                trade_result = build_trade_proposal(
-                    symbol=sym,
-                    decision=trade_decision,
-                    investment_analysis=investment_analysis,
-                    preferences=preferences or {},
-                    portfolio=portfolio or {},
-                    trader=trader,
-                    spot_price=spot_price,
-                    explicit_user_action=explicit_action,
-                )
+                # ── Build trade proposal through the correct execution engine ──
+                route = resolve_execution_target(sym, resolved_asset.get("asset_type"))
+                if route.get("execution_target") == PAPER_EQUITY and user_id:
+                    trade_result = prepare_equity_proposal(
+                        user_id=user_id,
+                        symbol=sym,
+                        decision=trade_decision,
+                        investment_analysis=investment_analysis,
+                        preferences=preferences or {},
+                        portfolio=portfolio or {},
+                        spot_price=spot_price,
+                        requested_quantity=requested_quantity,
+                    )
+                else:
+                    trade_result = build_trade_proposal(
+                        symbol=sym,
+                        decision=trade_decision,
+                        investment_analysis=investment_analysis,
+                        preferences=preferences or {},
+                        portfolio=portfolio or {},
+                        trader=trader,
+                        spot_price=spot_price,
+                        explicit_user_action=explicit_action,
+                    )
         
                 # Append trade status
                 if trade_result["status"] == "EXECUTABLE":
                     prop = trade_result["proposal"]
-        
-                    summary_md += (
-                        f"\n\n---\n"
-                        f"🔗 **Live Thetanuts Contract Found** · "
-                        f"{prop['option_type']} Strike: `{prop['strike']}` · "
-                        f"Collateral: `{prop['collateral_usdc']} USDC`"
-                    )
+                    if prop.get("execution_target") == PAPER_EQUITY:
+                        summary_md += (
+                            f"\n\n---\n"
+                            f"📄 **Paper {trade_decision} prepared** · "
+                            f"`{prop['shares']}` share(s) at `${prop['price']:.2f}`"
+                        )
+                    else:
+                        summary_md += (
+                            f"\n\n---\n"
+                            f"🔗 **Live Thetanuts Contract Found** · "
+                            f"{prop['option_type']} Strike: `{prop['strike']}` · "
+                            f"Collateral: `{prop['collateral_usdc']} USDC`"
+                        )
         
                 elif trade_decision in ("BUY", "SELL"):
                     summary_md += (
@@ -278,6 +302,11 @@ class AIAgent:
                     "trade_proposal": trade_result.get("proposal"),
                     "trade_status": trade_result["status"],
                     "trade_reason": trade_result["reason"],
+                    "explicit_user_action": explicit_action,
+                    "requested_quantity": requested_quantity,
+                    "resolved_symbol": sym,
+                    "resolved_asset_type": resolved_asset.get("asset_type"),
+                    "execution_target": route.get("execution_target"),
                 }
         
             except Exception as e:

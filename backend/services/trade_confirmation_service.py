@@ -11,6 +11,7 @@ from firebase_admin import firestore
 from firebase_config import db
 from services.execution_service import execute_prepared_proposal
 from services.opportunity_prepare_service import prepare_opportunity_for_user
+from services.execution_router import PAPER_EQUITY
 from trading.execution_modes import CONFIRMATION_MODE
 
 logger = logging.getLogger(__name__)
@@ -303,11 +304,17 @@ def _update_for_reconfirmation(ref, data: dict, execution: dict) -> dict:
         current["previewed_price"] = current.get("price")
 
     proposal = deepcopy(data.get("proposal_snapshot") or {})
-    selector = proposal.setdefault("selector", {})
-    selector.update(current)
-    if data.get("decision"):
-        selector["decision"] = data.get("decision")
-    proposal["confirm_selector"] = dict(selector)
+    if proposal.get("execution_target") == PAPER_EQUITY:
+        for field in ("price", "shares", "quantity", "estimated_value"):
+            if current.get(field) is not None:
+                proposal[field] = current[field]
+        selector = None
+    else:
+        selector = proposal.setdefault("selector", {})
+        selector.update(current)
+        if data.get("decision"):
+            selector["decision"] = data.get("decision")
+        proposal["confirm_selector"] = dict(selector)
 
     version = int(data.get("proposal_version") or 1) + 1
     terms_hash = compute_terms_hash(proposal)
@@ -392,7 +399,7 @@ def confirm_confirmation(user_id: str, confirmation_id: str, proposal_version: i
         success = False
         http_status = 409
     elif execution.get("ok"):
-        final_status = DRY_RUN_OK if status == DRY_RUN_OK else EXECUTED
+        final_status = status if status in {DRY_RUN_OK, PAPER_EXECUTED} else EXECUTED
         success = True
         http_status = 200
     else:

@@ -4,6 +4,7 @@ from ai_agent import AIAgent, trader, _log_thetanuts_trade, FORCE_DRY_RUN
 from trading.validator import validate_confirmation
 from services.execution_service import execute_prepared_proposal
 from services.portfolio_service import get_portfolio_state
+from services.trade_confirmation_service import create_confirmation
 from firebase_config import db
 from security import require_auth
 from datetime import datetime
@@ -405,6 +406,7 @@ def chat_with_agent():
             preferences  = preferences,
             user_goal    = tabung_goal,
             portfolio    = portfolio_data,
+            user_id      = user_id,
         )
         # LOCAL TEST: explicit user BUY command forces BUY execution.
         # The AI analysis can still say HOLD/SELL, but an explicit "buy ..."
@@ -420,7 +422,38 @@ def chat_with_agent():
         # (or produces the same safe dry-run preview while FORCE_DRY_RUN is
         # enabled). Alert-only mode never exposes an executable action to
         # the frontend.
-        if result.get("trade_status") == "EXECUTABLE":
+        # An explicit paper-equity SELL is a manual instruction, so it always
+        # uses the shared OpportunityConfirmation Confirm/Reject workflow.
+        # Scanner-driven automated SELLs continue to execute automatically.
+        if (
+            result.get("trade_status") == "EXECUTABLE"
+            and result.get("explicit_user_action") == "SELL"
+            and result.get("execution_target") == "PAPER_EQUITY"
+        ):
+            manual_id = f"manual-sell-{user_id}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            opportunity = {
+                "analysis_id": manual_id,
+                "analysis": result.get("investment_analysis") or {},
+                "analysis_snapshot": result.get("investment_analysis") or {},
+                "symbol": result.get("resolved_symbol"),
+                "asset_type": result.get("resolved_asset_type"),
+                "decision": "SELL",
+                "kind": "SELL",
+                "confidence": (result.get("investment_analysis") or {}).get("confidence"),
+                "risk_level": (result.get("investment_analysis") or {}).get("risk_level"),
+                "spot_price": (result.get("investment_analysis") or {}).get("current_price"),
+                "requested_quantity": result.get("requested_quantity"),
+            }
+            created = create_confirmation(user_id, opportunity)
+            confirmation = created.get("confirmation") or {}
+            result["opportunity_confirmation"] = confirmation
+            result["trade_proposal"] = None
+            result["trade_status"] = confirmation.get("status", "FAILED")
+            result["trade_reason"] = confirmation.get("error") or "Review the sell order and confirm or reject it."
+            if confirmation.get("status") == "PENDING":
+                result["final_advice"] += "\n\n**Confirm or reject this SELL in the opportunity confirmation popup.**"
+
+        elif result.get("trade_status") == "EXECUTABLE":
             copilot_mode = _execution_mode(preferences)
             proposal = result.get("trade_proposal")
 
@@ -1152,4 +1185,3 @@ def confirm_trade():
             "success": False,
             "error": "Could not confirm trade.",
         }), 500
-
