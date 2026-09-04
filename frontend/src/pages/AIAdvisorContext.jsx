@@ -237,13 +237,26 @@ async function _callBackend(conversationId, { text, fileData, fileName, highligh
           role: 'assistant',
           content: data.data.final_advice,
           investmentAnalysis: data.data.investment_analysis || null,
+          tradeStatus: data.data.trade_status || null,
+          tradeReason: data.data.trade_reason || null,
+          tradeProposal: data.data.trade_proposal || null,
         }]);
-      }
+}
       
       // Extract trade proposal when backend risk analysis outputs execution recommendation
-      if (data.data.trade_proposal) {
-        setPendingTrade(normalizeTradeProposal(data.data.trade_proposal));
-      }
+      // Only create an actionable trade popup when the backend explicitly
+    // says the proposal is EXECUTABLE and a proposal exists.
+    const isExecutable =
+      data.data.trade_status === 'EXECUTABLE' &&
+      !!data.data.trade_proposal;
+        
+    if (isExecutable) {
+      setPendingTrade(normalizeTradeProposal(data.data.trade_proposal));
+    } else {
+      // Explicitly clear any stale pending trade when the new AI result
+      // is not executable.
+      setPendingTrade(null);
+    }
     } else {
       throw new Error("Invalid response format from server.");
     }

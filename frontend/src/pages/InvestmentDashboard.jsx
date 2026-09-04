@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import axios from 'axios';
 import { auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { useAIAdvisor } from './AIAdvisorContext'
 import './InvestmentDashboard.css';
 
 const API_BASE = 'http://127.0.0.1:5000/api';
@@ -200,41 +199,84 @@ function HoldingCard({ h }) {
 }
 
 function TradeProposalModal({ proposal, onClose, onSuccess }) {
+  const { confirmTrade } = useAIAdvisor();
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState(null);
 
   if (!proposal) return null;
 
+  const selector =
+    proposal.confirm_selector ||
+    proposal.selector ||
+    {};
+
+  const action = (proposal.action || proposal.decision || 'BUY').toUpperCase();
+
+  const ticker =
+    proposal.ticker ||
+    proposal.symbol ||
+    selector.underlying ||
+    'N/A';
+
+  const optionType =
+    selector.option_type ||
+    proposal.option_type ||
+    'N/A';
+
+  const strike =
+    selector.strike ??
+    proposal.strike;
+
+  const expiry =
+    selector.expiry ??
+    proposal.expiry;
+
+  const premium =
+    selector.previewed_price ??
+    selector.price ??
+    proposal.previewed_price ??
+    proposal.price;
+
+  const contracts =
+    selector.contracts ??
+    proposal.contracts ??
+    selector.quantity ??
+    proposal.quantity ??
+  1;
+
+  const collateral =
+    selector.collateral_usdc ??
+    proposal.collateral_usdc ??
+    proposal.proposed_amount_usdc;
+
+  const spotPrice =
+    proposal.current_price ??
+    proposal.spot_price ??
+    proposal.market_price;
+
+  const confidence = proposal.confidence;
+  const riskLevel = proposal.risk_level || proposal.risk_tolerance;
+
   const handleExecute = async () => {
     setExecuting(true);
     setError(null);
+
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User not authenticated');
-      const token = await user.getIdToken();
-
-      const isBuy = (proposal.action || 'buy').toLowerCase() === 'buy';
-      const endpoint = `${API_BASE}/stocks/portfolio/${isBuy ? 'buy' : 'sell'}`;
-
-      const res = await axios.post(
-        endpoint,
-        {
-          ticker: proposal.ticker,
-          shares: proposal.recommended_shares,
-          price: proposal.current_price,
-          reason: proposal.reason || 'AI Swarm Executed Trade'
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (res.data.success) {
-        onSuccess();
-        onClose();
-      } else {
-        setError(res.data.error || 'Execution failed.');
+      if (!proposal.confirm_selector) {
+        throw new Error('No valid Thetanuts trade selector was provided.');
       }
+
+      await confirmTrade(false);
+
+      // confirmTrade handles the actual backend execution and updates
+      // pendingTrade with EXECUTED / DRY_RUN_OK / NEEDS_RECONFIRMATION.
+      if (onSuccess) {
+        await onSuccess();
+      }
+
     } catch (err) {
-      setError(err.response?.data?.error || err.message || 'Execution failed.');
+      console.error('Thetanuts confirmation error:', err);
+      setError(err.message || 'Trade confirmation failed.');
     } finally {
       setExecuting(false);
     }
@@ -243,52 +285,151 @@ function TradeProposalModal({ proposal, onClose, onSuccess }) {
   return (
     <div className="modal-overlay">
       <div className="modal-card">
+
         <h3>Confirm AI Trade Recommendation</h3>
-        <p className="modal-subtitle">The AI Swarm and Risk Gate have prepared the following execution parameters:</p>
-        
+
+        <p className="modal-subtitle">
+          The AI Swarm and Risk Gate have prepared the following
+          Thetanuts options execution parameters:
+        </p>
+
         <div className="modal-details">
+
+          {/* Action */}
           <div className="modal-row">
             <span>Action:</span>
-            <strong className={`trade-badge trade-badge--${proposal.action?.toLowerCase()}`}>
-              {proposal.action?.toUpperCase()}
+            <strong
+              className={`trade-badge trade-badge--${action.toLowerCase()}`}
+            >
+              {action}
             </strong>
           </div>
+
+          {/* Underlying */}
           <div className="modal-row">
-            <span>Ticker:</span>
-            <strong>{proposal.ticker}</strong>
+            <span>Underlying:</span>
+            <strong>{ticker}</strong>
           </div>
+
           <div className="modal-row">
-            <span>Recommended Shares:</span>
-            <strong>{proposal.recommended_shares}</strong>
+            <span>Contracts:</span>
+            <strong>
+              {contracts != null ? contracts : 'N/A'}
+            </strong>
           </div>
+
+          {/* Spot price */}
           <div className="modal-row">
             <span>Market Price:</span>
-            <strong>{fmtUSD(proposal.current_price)}</strong>
+            <strong>
+              {spotPrice != null && Number.isFinite(Number(spotPrice))
+                ? fmtUSD(Number(spotPrice))
+                : 'N/A'}
+            </strong>
           </div>
-          {proposal.stop_loss_price && (
+
+          {/* Option type */}
+          <div className="modal-row">
+            <span>Option:</span>
+            <strong>{optionType}</strong>
+          </div>
+
+          {/* Strike */}
+          <div className="modal-row">
+            <span>Strike:</span>
+            <strong>
+              {strike != null && Number.isFinite(Number(strike))
+                ? fmtUSD(Number(strike))
+                : 'N/A'}
+            </strong>
+          </div>
+
+          {/* Expiry */}
+          <div className="modal-row">
+            <span>Expiry:</span>
+            <strong>
+              {expiry ? formatExpiry(expiry) : 'N/A'}
+            </strong>
+          </div>
+
+          {/* Premium */}
+          <div className="modal-row">
+            <span>Option Premium:</span>
+            <strong>
+              {premium != null && Number.isFinite(Number(premium))
+                ? fmtUSD(Number(premium), {
+                    minimumFractionDigits: 4,
+                    maximumFractionDigits: 4,
+                  })
+                : 'N/A'}
+            </strong>
+          </div>
+
+          {/* Collateral */}
+          <div className="modal-row">
+            <span>Collateral:</span>
+            <strong>
+              {collateral != null && Number.isFinite(Number(collateral))
+                ? `${Number(collateral).toFixed(4)} USDC`
+                : 'N/A'}
+            </strong>
+          </div>
+
+          {/* Confidence */}
+          {confidence != null && (
             <div className="modal-row">
-              <span>Stop Loss Price:</span>
-              <strong>{fmtUSD(proposal.stop_loss_price)}</strong>
+              <span>AI Confidence:</span>
+              <strong>
+                {Number(confidence) <= 1
+                  ? `${Math.round(Number(confidence) * 100)}%`
+                  : `${Math.round(Number(confidence))}%`}
+              </strong>
             </div>
           )}
+
+          {/* Risk */}
+          {riskLevel && (
+            <div className="modal-row">
+              <span>Risk:</span>
+              <strong>{riskLevel}</strong>
+            </div>
+          )}
+
           {proposal.capped_by && (
             <div className="modal-row modal-row--warning">
               <span>Risk Gate Constraint:</span>
               <span>{proposal.capped_by}</span>
             </div>
           )}
+
         </div>
 
-        {error && <p className="modal-error">{error}</p>}
+        {error && (
+          <p className="modal-error">
+            {error}
+          </p>
+        )}
 
         <div className="modal-actions">
-          <button className="btn-secondary" onClick={onClose} disabled={executing}>
+
+          <button
+            className="btn-secondary"
+            onClick={onClose}
+            disabled={executing}
+          >
             Dismiss
           </button>
-          <button className="btn-primary" onClick={handleExecute} disabled={executing}>
+
+          <button
+            className="btn-primary"
+            onClick={handleExecute}
+            disabled={executing}
+          >
             {executing ? 'Executing...' : 'Approve Trade'}
           </button>
+
         </div>
+
       </div>
     </div>
   );
@@ -296,7 +437,6 @@ function TradeProposalModal({ proposal, onClose, onSuccess }) {
 
 /* ── Main Dashboard ── */
 export default function InvestmentDashboard({ userName }) {
-  const { pendingTrade, setPendingTrade } = useAIAdvisor();
   const [trades, setTrades] = useState([]);
   const [currentPrices, setCurrentPrices] = useState({});
   const [loading, setLoading] = useState(true);
@@ -584,15 +724,6 @@ export default function InvestmentDashboard({ userName }) {
         </section>
 
       </div>
-
-      {/* Place the trade execution modal right here */}
-      {pendingTrade && (
-        <TradeProposalModal
-          proposal={pendingTrade}
-          onClose={() => setPendingTrade(null)}
-          onSuccess={fetchData}
-        />
-      )}
 
     </div>
   );

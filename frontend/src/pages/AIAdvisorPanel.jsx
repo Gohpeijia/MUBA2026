@@ -24,8 +24,8 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
 
   /* ── Auto-scroll on new message ── */
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+}, [messages, loading, pendingTrade]);
 
   /* ── Auto-resize textarea ── */
   useEffect(() => {
@@ -136,7 +136,7 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
             across messages until dismissed or replaced by the next
             proposal — it's a "what just happened" summary, not a
             per-message chat bubble. */}
-        <TradeResultCard trade={pendingTrade} onDismiss={clearPendingTrade} />
+        
 
         {/* Chat window */}
         <div className="ai-panel__chat">
@@ -145,64 +145,70 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
               key={i}
               className={`ai-panel__row ${msg.role === 'user' ? 'ai-panel__row--user' : 'ai-panel__row--assistant'}`}
             >
-              {msg.role === 'assistant' && (
-                <div className="ai-panel__msg-avatar">
-                  <FaRobot size={11} />
-                </div>
-              )}
-              <div className={`ai-panel__bubble ${msg.role === 'user' ? 'ai-panel__bubble--user' : 'ai-panel__bubble--assistant'}`}>
-                {msg.highlightedText && (
-                  <div className="ai-panel__bubble-context-quote">
-                    Context: "{msg.highlightedText}"
-                  </div>
-                )}
-
-                {msg.fileName && (
-                  <div className="ai-panel__file-tag">
-                    <FaFileAlt size={10} />
-                    <span>{msg.fileName}</span>
-                  </div>
-                )}
-
-                {msg.role === 'assistant' ? (
-                  <div className="ai-panel__bubble-text ai-panel__bubble-markdown">
-                    <ReactMarkdown
-                      components={{
-                        strong: ({ children }) => <strong className="md-bold">{children}</strong>,
-                        em: ({ children }) => <em className="md-italic">{children}</em>,
-                        h1: ({ children }) => <div className="md-h1">{children}</div>,
-                        h2: ({ children }) => <div className="md-h2">{children}</div>,
-                        h3: ({ children }) => <div className="md-h3">{children}</div>,
-                        ul: ({ children }) => <ul className="md-ul">{children}</ul>,
-                        ol: ({ children }) => <ol className="md-ol">{children}</ol>,
-                        li: ({ children }) => <li className="md-li">{children}</li>,
-                        p: ({ children }) => <p className="md-p">{children}</p>,
-                        hr: () => <hr className="md-hr" />,
-                        code: ({ children }) => <code className="md-code">{children}</code>,
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-
-                    {msg.investmentAnalysis && (
-                      <div style={{ marginTop: '0.65rem' }}>
-                        <InvestmentIntelligenceCard data={msg.investmentAnalysis} />
+                      {msg.role === 'assistant' && (
+                        <div className="ai-panel__msg-avatar">
+                          <FaRobot size={11} />
+                        </div>
+                      )}
+                      <div className={`ai-panel__bubble ${msg.role === 'user' ? 'ai-panel__bubble--user' : 'ai-panel__bubble--assistant'}`}>
+                        {msg.highlightedText && (
+                          <div className="ai-panel__bubble-context-quote">
+                            Context: "{msg.highlightedText}"
+                          </div>
+                        )}
+        
+                        {msg.fileName && (
+                          <div className="ai-panel__file-tag">
+                            <FaFileAlt size={10} />
+                            <span>{msg.fileName}</span>
+                          </div>
+                        )}
+        
+                        {msg.role === 'assistant' ? (
+                          <div className="ai-panel__bubble-text ai-panel__bubble-markdown">
+                            <ReactMarkdown
+                              components={{
+                                strong: ({ children }) => <strong className="md-bold">{children}</strong>,
+                                em: ({ children }) => <em className="md-italic">{children}</em>,
+                                h1: ({ children }) => <div className="md-h1">{children}</div>,
+                                h2: ({ children }) => <div className="md-h2">{children}</div>,
+                                h3: ({ children }) => <div className="md-h3">{children}</div>,
+                                ul: ({ children }) => <ul className="md-ul">{children}</ul>,
+                                ol: ({ children }) => <ol className="md-ol">{children}</ol>,
+                                li: ({ children }) => <li className="md-li">{children}</li>,
+                                p: ({ children }) => <p className="md-p">{children}</p>,
+                                hr: () => <hr className="md-hr" />,
+                                code: ({ children }) => <code className="md-code">{children}</code>,
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
+                            
+                            {msg.investmentAnalysis && (
+                              <div style={{ marginTop: '0.65rem' }}>
+                                <InvestmentIntelligenceCard
+                                  data={msg.investmentAnalysis}
+                                  tradeStatus={msg.tradeStatus}
+                                  tradeReason={msg.tradeReason}
+                                  tradeProposal={msg.tradeProposal}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="ai-panel__bubble-text">{msg.content}</span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <span className="ai-panel__bubble-text">{msg.content}</span>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {/* Typing indicator */}
+                    </div>
+                  ))}
+        
+        
           {loading && (
             <div className="ai-panel__row ai-panel__row--assistant">
               <div className="ai-panel__msg-avatar">
                 <FaRobot size={11} />
               </div>
+          
               <div className="ai-panel__bubble ai-panel__bubble--assistant ai-panel__bubble--typing">
                 <span className="ai-panel__typing-dot" />
                 <span className="ai-panel__typing-dot" />
@@ -210,7 +216,16 @@ export default function AIAdvisorPanel({ pendingText, onClearPending }) {
               </div>
             </div>
           )}
-
+        
+          {pendingTrade && (
+            <div className="ai-panel__trade-confirmation">
+              <TradeResultCard
+                trade={pendingTrade}
+                onDismiss={clearPendingTrade}
+              />
+            </div>
+          )}
+        
           <div ref={chatEndRef} />
         </div>
 
