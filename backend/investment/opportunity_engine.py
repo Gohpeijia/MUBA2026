@@ -78,6 +78,51 @@ def submit_notification_job(opportunities):
     future.add_done_callback(_handle_notification_result)
 
 
+def _dispatch_opportunities_sync(opportunities, dispatch_fn):
+    """
+    Runs dispatch_fn (dispatch_buy_opportunity / dispatch_sell_opportunity)
+    for every opportunity, one at a time. Each call is itself per-user and
+    mode-aware — it reads riskCopilotMode and does the right thing (alert,
+    create a confirmation, or execute) for every targeted user.
+
+    Returns the union of analysis_ids that were successfully dispatched to
+    at least one user, in the same shape _handle_notification_result expects.
+    """
+    successful_ids = set()
+    for opportunity in opportunities or []:
+        try:
+            for analysis_id in dispatch_fn(opportunity):
+                successful_ids.add(analysis_id)
+        except Exception:
+            logger.exception(
+                "Dispatch failed for opportunity %s",
+                opportunity.get("analysis_id"),
+            )
+    return list(successful_ids)
+
+
+def submit_dispatch_job(opportunities, *, kind: str = "BUY"):
+    """
+    Public entry point for actually acting on newly-claimed opportunities,
+    per user preference — as opposed to submit_notification_job, which only
+    sends the generic "new opportunity found" broadcast push.
+
+    This is what makes "Fully automated recommendations" actually execute,
+    "Suggest actions, I confirm each one" actually pop the confirmation
+    card, and "Alert me only" actually stay hands-off. Without this call,
+    services/opportunity_action_service.py's per-mode logic is never
+    reached by the scanners — only by the ad-hoc chat/confirm-trade paths.
+
+    Runs on the same background executor as notifications so a slow batch
+    of trade preparations/executions never blocks the scan loop itself.
+    """
+    from services.opportunity_action_service import dispatch_buy_opportunity, dispatch_sell_opportunity
+
+    dispatch_fn = dispatch_sell_opportunity if kind == "SELL" else dispatch_buy_opportunity
+    future = _NOTIFICATION_EXECUTOR.submit(_dispatch_opportunities_sync, opportunities, dispatch_fn)
+    future.add_done_callback(_handle_notification_result)
+
+
 # Prevent overlapping scans. Shared by BUY and SELL — both hit the same
 # rate-limited data/AI providers, so they must never run concurrently.
 _SCAN_LOCK = threading.Lock()
@@ -298,8 +343,15 @@ def _execute_scan_pipeline():
 
     if new_opportunities:
         # BUY opportunities broadcast to every opted-in user — discovery is
-        # not user-specific, unlike SELL.
+        # not user-specific, unlike SELL. This is the generic "new
+        # opportunity found" push only.
         submit_notification_job(new_opportunities)
+
+        # Separately, actually act on it per each user's saved execution
+        # mode (alert-only / confirm-each / fully automated). Without this,
+        # AUTOMATED_MODE users never get an auto-executed trade from the
+        # scanner — only the passive discovery notification above.
+        submit_dispatch_job(new_opportunities, kind="BUY")
 
     return _LATEST_OPPORTUNITIES
 

@@ -60,7 +60,7 @@ def process_opportunity_for_user(opportunity: dict, user_id: str) -> dict:
         if not proposal:
             result = {"ok": False, "status": prepared.get("status") or "RECOMMEND_ONLY", "error": prepared.get("reason") or prepared.get("error")}
         else:
-            result = execute_trade_proposal(proposal, action="AUTO_OPPORTUNITY")
+            result = execute_trade_proposal(proposal, action="AUTO_OPPORTUNITY", user_id=user_id)
         notify_execution_result(user_id=user_id, opportunity=opportunity, result=result)
         return {"user_id": user_id, "analysis_id": analysis_id, "mode": mode, "status": result.get("status"), "result": result}
 

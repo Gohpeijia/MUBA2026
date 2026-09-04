@@ -1,9 +1,59 @@
 import logging
+from datetime import datetime
 
 from ai_agent import trader, _log_thetanuts_trade, FORCE_DRY_RUN
+from firebase_config import db
 from trading.validator import validate_confirmation, MAX_PRICE_DRIFT_PCT
 
 logger = logging.getLogger(__name__)
+
+
+def _record_trade_for_dashboard(
+    user_id: str,
+    *,
+    ticker: str,
+    action: str,
+    option_type: str = None,
+    strike=None,
+    expiry=None,
+    collateral_usdc: float = None,
+    fill_price=None,
+    reason: str = "",
+) -> None:
+    """
+    Mirrors a completed options fill into users/{uid}/trades — the same
+    Firestore subcollection portfolio_routes.py's _record_trade() writes
+    to for equity buy/sell — so it shows up in InvestmentDashboard.jsx's
+    "Trade History" card, sorted by date, alongside share trades.
+
+    Tagged with assetType: "OPTION" so the frontend can keep options out
+    of the equity average-cost-basis math (quantity/price mean something
+    different here — see InvestmentDashboard.jsx's computeHoldings).
+
+    Never raises — a logging failure must never break a live trade
+    execution that already succeeded on-chain.
+    """
+    if not user_id:
+        return
+    try:
+        db.collection("users").document(user_id).collection("trades").add({
+            "ticker": ticker,
+            "action": (action or "").lower(),   # 'buy' | 'sell'
+            "assetType": "OPTION",
+            "optionType": option_type,
+            "strike": strike,
+            "expiry": expiry,
+            # quantity/price kept for display parity with equity rows;
+            # collateral_usdc is the actual dollar figure that moved.
+            "quantity": 1,
+            "price": collateral_usdc,
+            "fillPrice": fill_price,
+            "companyName": ticker,
+            "reason": reason or "AI Thetanuts execution",
+            "timestamp": datetime.now().isoformat(),
+        })
+    except Exception:
+        logger.exception("Failed to record dashboard trade entry for user %s / %s", user_id, ticker)
 
 
 def order_field(order: dict, *names):
@@ -60,7 +110,7 @@ def _price_drift_exceeded(previewed_price, current_price) -> bool:
         return False
 
 
-def execute_confirmed_buy(proposal: dict, *, action: str = "CONFIRM") -> dict:
+def execute_confirmed_buy(proposal: dict, *, action: str = "CONFIRM", user_id: str = None) -> dict:
     selector = (proposal or {}).get("selector") or {}
     ticker = selector.get("underlying") or proposal.get("underlying")
     option_type = selector.get("option_type") or proposal.get("option_type")
@@ -127,6 +177,17 @@ def execute_confirmed_buy(proposal: dict, *, action: str = "CONFIRM") -> dict:
 
     if FORCE_DRY_RUN and execution.get("ok"):
         execution["status"] = execution.get("status") or "DRY_RUN_OK"
+        _record_trade_for_dashboard(
+            user_id,
+            ticker=ticker,
+            action="buy",
+            option_type=order_field(current_order, "option_type", "optionType", "type"),
+            strike=order_field(current_order, "strike", "strikePrice", "strike_price"),
+            expiry=order_field(current_order, "expiry", "expiryTimestamp", "expiration", "expirationTimestamp"),
+            collateral_usdc=collateral_usdc,
+            fill_price=current_price,
+            reason=f"AI {action} (dry run)",
+        )
         return execution
 
     if not FORCE_DRY_RUN:
@@ -144,10 +205,22 @@ def execute_confirmed_buy(proposal: dict, *, action: str = "CONFIRM") -> dict:
             "dry_run": False,
             "error": execution.get("error"),
         })
+        if execution.get("ok"):
+            _record_trade_for_dashboard(
+                user_id,
+                ticker=ticker,
+                action="buy",
+                option_type=order_field(current_order, "option_type", "optionType", "type"),
+                strike=order_field(current_order, "strike", "strikePrice", "strike_price"),
+                expiry=order_field(current_order, "expiry", "expiryTimestamp", "expiration", "expirationTimestamp"),
+                collateral_usdc=collateral_usdc,
+                fill_price=current_price,
+                reason=f"AI {action}",
+            )
     return execution
 
 
-def execute_confirmed_sell(proposal: dict, *, action: str = "CONFIRM") -> dict:
+def execute_confirmed_sell(proposal: dict, *, action: str = "CONFIRM", user_id: str = None) -> dict:
     selector = (proposal or {}).get("selector") or {}
     ticker = selector.get("underlying") or proposal.get("underlying")
     option_type = selector.get("option_type") or proposal.get("option_type")
@@ -200,14 +273,23 @@ def execute_confirmed_sell(proposal: dict, *, action: str = "CONFIRM") -> dict:
         "position_address": position_address,
         "error": None,
     })
+    _record_trade_for_dashboard(
+        user_id,
+        ticker=ticker,
+        action="sell",
+        option_type=option_type,
+        strike=strike,
+        expiry=expiry,
+        reason=f"AI {action}",
+    )
     return result
 
 
-def execute_trade_proposal(proposal: dict, *, action: str = "CONFIRM") -> dict:
+def execute_trade_proposal(proposal: dict, *, action: str = "CONFIRM", user_id: str = None) -> dict:
     selector = (proposal or {}).get("selector") or {}
     decision = str(selector.get("decision") or proposal.get("decision") or proposal.get("action") or "").upper().strip()
     if decision == "BUY":
-        return execute_confirmed_buy(proposal, action=action)
+        return execute_confirmed_buy(proposal, action=action, user_id=user_id)
     if decision == "SELL":
-        return execute_confirmed_sell(proposal, action=action)
+        return execute_confirmed_sell(proposal, action=action, user_id=user_id)
     return {"ok": False, "status": "FAILED", "error": f"Unsupported trade decision: {decision or 'missing'}."}

@@ -212,7 +212,22 @@ class AIAgent:
 
         # ── 3. GENERAL CONVERSATION / GENERAL FINANCE QUESTION ────────────────
         print(f"ℹ️ [AIAgent] General financial inquiry. Generating conversational guidance...")
-        system_prompt = self.prompt_engine.get_system_prompt(preferences, wallet_balance={"ok": False})
+
+        # Was previously hardcoded to {"ok": False}, which told the LLM to
+        # "treat as zero funds, do not recommend execution" regardless of
+        # the wallet's actual on-chain balance — matching wallet_routes.py
+        # here so the chat sees the same live numbers the wallet pill does.
+        try:
+            live_wallet_balance = trader.get_wallet_balance()
+        except Exception as e:
+            print(f"⚠️ [AIAgent] Failed to fetch live wallet balance: {e}")
+            live_wallet_balance = {"ok": False, "eth": 0.0, "usdc": 0.0, "tradable_usdc": 0.0}
+
+        system_prompt = self.prompt_engine.get_system_prompt(
+            preferences,
+            portfolio=portfolio or {},
+            wallet_balance=live_wallet_balance,
+        )
         prompt_content = f"User Question: {user_input}\nContext: {page_context}\nPlease provide a helpful, professional, and structured financial response."
 
         return self.build_final_response(

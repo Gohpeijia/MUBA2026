@@ -21,6 +21,15 @@ const getGreeting = () => {
 const fmtDate = (ts) =>
   new Date(ts).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 
+// Options contract expiry — value may be a unix timestamp (seconds) from
+// the Thetanuts selector, unlike trade.timestamp which is an ISO string.
+const formatExpiry = (value) => {
+  if (!value) return 'N/A';
+  const n = Number(value);
+  const date = Number.isFinite(n) && n > 1_000_000_000 ? new Date(n < 1e12 ? n * 1000 : n) : new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 const fmtRM = (value) =>
   new Intl.NumberFormat("en-MY", {
     style: "currency",
@@ -81,11 +90,22 @@ function groupTradesByDay(sortedTradeList) {
 /*
  * Derive per-ticker holdings + realized P&L from a flat trade log,
  * using the average-cost-basis method. Trades must be chronological.
+ *
+ * Options fills (assetType === 'OPTION') are excluded here — their
+ * "quantity"/"price" fields represent collateral_usdc and premium, not
+ * shares and share price, so running them through equity cost-basis
+ * math would produce nonsense holdings/P&L. They still show up in the
+ * Trade History list below (see isOptionTrade/renderTradeRow), just not
+ * folded into these share-holding cards.
  */
+const isOptionTrade = (t) => t.assetType === 'OPTION';
+
 function computeHoldings(trades, currentPrices) {
   const byTicker = {};
 
-  const sorted = [...trades].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const sorted = [...trades]
+    .filter((t) => !isOptionTrade(t))
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
   for (const t of sorted) {
     const qty = parseFloat(t.quantity) || 0;
@@ -528,13 +548,25 @@ export default function InvestmentDashboard({ userName }) {
                   </div>
                   <div className="trade-list">
                     {group.trades.map((t) => {
-                      const total = (parseFloat(t.quantity) || 0) * (parseFloat(t.price) || 0);
+                      const isOption = isOptionTrade(t);
+                      // Equity: quantity * price = total spent/received.
+                      // Options: "price" here is collateral_usdc (the
+                      // dollar figure that actually moved on-chain) — see
+                      // trade_execution_service.py's _record_trade_for_dashboard.
+                      const total = isOption
+                        ? (parseFloat(t.price) || 0)
+                        : (parseFloat(t.quantity) || 0) * (parseFloat(t.price) || 0);
+                      const detail = isOption
+                        ? `${t.optionType || 'Option'} ${t.strike != null ? `@ ${fmtUSD(t.strike)}` : ''}${t.expiry ? ` · exp ${formatExpiry(t.expiry)}` : ''}`
+                        : `${t.quantity} sh @ ${fmtUSD(t.price)}`;
                       return (
                         <div className="trade-row" key={t.id}>
                           <ActionBadge action={t.action} />
                           <div className="trade-row-main">
-                            <span className="trade-row-ticker">{t.ticker}</span>
-                            <span className="trade-row-detail">{t.quantity} sh @ {fmtUSD(t.price)}</span>
+                            <span className="trade-row-ticker">
+                              {t.ticker}{isOption && <span className="trade-row-tag"> · Options</span>}
+                            </span>
+                            <span className="trade-row-detail">{detail}</span>
                           </div>
                           <div className="trade-row-right">
                             <span className="trade-row-total">{fmtUSD(total)}</span>
