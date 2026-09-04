@@ -35,9 +35,11 @@ def get_wallet_balance():
     balance = {
         **chain_balance,
         "paper_cash_usd": paper_cash,
-        "tradable_usdc": paper_cash,
-        "usdc": paper_cash,
-        "balance_source": "PAPER_EQUITY",
+        "paper_tradable_usd": paper_cash,
+        # Do not replace the Anvil/on-chain USDC fields with the unrelated
+        # paper-equity cash balance.  The top-level `usdc` and
+        # `tradable_usdc` values must always describe the configured wallet.
+        "balance_source": "ONCHAIN_USDC",
         "chain_wallet": chain_balance,
     }
     return jsonify({"success": True, "data": balance})
