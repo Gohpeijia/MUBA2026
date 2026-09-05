@@ -32,9 +32,8 @@ export default function WalletBalance({ variant = 'pill' }) {
       const res = await fetch(`${API_BASE}/paper-balance`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-
       const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || `Server returned ${res.status}`);
       setBalance(json.data || null);
     } catch (e) {
       setFetchError(e.message || 'Could not reach the wallet service.');
@@ -110,20 +109,17 @@ export default function WalletBalance({ variant = 'pill' }) {
             <div className="wallet-balance__row">
               <span className="wallet-balance__amount">
                 {Number(balance.paper_tradable_usd || 0).toFixed(2)}
-                <span className="wallet-balance__unit"> USD paper</span>
+                <span className="wallet-balance__unit"> USDC</span>
               </span>
-              {variant === 'card' && (
-                <span className="wallet-balance__label">paper cash</span>
-              )}
             </div>
 
             {variant === 'card' && (
               <div className="wallet-balance__meta">
-                <span>Available for stock purchases</span>
-                {balance.chain_wallet && (
+                <span>Anvil: {Number(balance.usdc || 0).toFixed(2)} USDC</span>
+                {balance.eth != null && (
                   <>
                     <span className="wallet-balance__dot">·</span>
-                    <span>{Number(balance.chain_wallet.eth || 0).toFixed(5)} ETH gas</span>
+                    <span>{Number(balance.eth).toFixed(5)} ETH</span>
                   </>
                 )}
               </div>
@@ -131,7 +127,7 @@ export default function WalletBalance({ variant = 'pill' }) {
 
             {variant === 'card' && noTradableFunds && (
               <div className="wallet-balance__notice">
-                No paper cash available. Stock paper trades will be blocked until the fake fund is topped up.
+                Add USDC to your configured Anvil wallet, then refresh to fund stock simulations.
               </div>
             )}
           </>

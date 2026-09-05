@@ -1,3 +1,4 @@
+from services.chat_intent import explicit_trade_action
 # ai_agent.py  (Versi Diperbaiki)
 #
 # BUG DIPERBAIKI:
@@ -191,18 +192,9 @@ class AIAgent:
                 # AI's independent recommendation
                 ai_decision = investment_analysis.get("decision", "HOLD")
 
-                # User's explicit trading intent
-                user_text = (user_input or "").strip().lower()
-                explicit_action = None
-
-                if re.search(r"\b(buy|purchase)\b", user_text):
-                    explicit_action = "BUY"
-                elif re.search(r"\b(sell|dispose)\b", user_text):
-                    explicit_action = "SELL"
-
-                # User's explicit BUY/SELL command controls the trade direction.
-                # AI recommendation is advisory only.
-                trade_decision = explicit_action or ai_decision
+                # Analysis and questions never inherit an executable AI decision.
+                explicit_action = explicit_trade_action(user_input)
+                trade_decision = explicit_action or "HOLD"
 
                 print(
                     f"🎯 [AIAgent] User intent: {explicit_action or 'NONE'} | "
@@ -250,19 +242,25 @@ class AIAgent:
                 )
         
                 # ── Build trade proposal ────────────────────────────────────
-                trade_result = build_trade_proposal(
-                    symbol=sym,
-                    decision=trade_decision,
-                    investment_analysis=investment_analysis,
-                    preferences=preferences or {},
-                    portfolio=portfolio or {},
-                    trader=trader,
-                    spot_price=spot_price,
-                    explicit_user_action=explicit_action,
-                    asset_type=asset_type,
-                    user_id=user_id,
-                )
-        
+                if explicit_action:
+                    trade_result = build_trade_proposal(
+                        symbol=sym,
+                        decision=trade_decision,
+                        investment_analysis=investment_analysis,
+                        preferences=preferences or {},
+                        portfolio=portfolio or {},
+                        trader=trader,
+                        spot_price=spot_price,
+                        explicit_user_action=explicit_action,
+                        asset_type=asset_type,
+                        user_id=user_id,
+                    )
+                else:
+                    trade_result = {
+                        "status": "RECOMMEND_ONLY", "proposal": None,
+                        "reason": "Analysis only. No trade was requested.",
+                    }
+
                 # Append trade status
                 if trade_result["status"] == "EXECUTABLE":
                     prop = trade_result["proposal"]

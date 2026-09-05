@@ -134,6 +134,8 @@ Implementation details:
 
 - **AI sequence:** technical, fundamental, and news reports run in parallel. The risk agent reviews those reports, then the committee combines all four. AI output is passed to application services; the agents do not sign transactions.
 - **Action modes:** manual and alert-only modes do not automatically execute. Confirmation mode waits for user approval; automated mode can dispatch a prepared proposal without a user click. Unsupported assets remain recommendation-only.
+- **Chat intent:** clear commands such as `buy AAPL` or `sell AAPL` can prepare a trade, subject to the selected mode and risk checks. Questions such as `Should I buy AAPL?`, analysis requests such as `Check AAPL`, negations, and ambiguous requests are analysis-only. An AI recommendation is not treated as permission to execute a chat trade. Scheduled opportunity scans continue to follow the saved action mode.
+- **Stock accounting:** buys reduce available cash and add shares at weighted average cost. Sells increase cash, reduce shares, and realize profit or loss against that cost. Portfolio value includes cash plus the latest available stock value; unrealized profit/loss applies only to remaining shares. MYR is a display conversion using backend `USD_MYR_RATE` (default `4.30`), not a live foreign-exchange quote.
 - **Option BUY:** the CLI supplies orders and fresh preview calldata. With dry-run disabled, `ThetanutsTrader` uses Web3.py to validate the chain and balances, approve USDC when necessary, submit the fill, and check receipts. Responses return through Flask to React.
 - **Option SELL:** only supported RFQ positions can be closed. `close_rfq_position()` delegates to the CLI's `position close` command; it does not use the BUY signing path. OptionBook exits are not implemented by this close flow.
 - **State and notifications:** Firebase handles authentication, Firestore stores application data, and Cloud Messaging delivers optional push notifications. The backend also records fill attempts in a local JSONL log.
@@ -173,7 +175,7 @@ The local fork must use chain ID `8453` to match the backend's live fill validat
 ### Prerequisites
 
 - Python 3.10 or newer (the source uses Python 3.10 union type syntax).
-- Node.js 22.12 or newer and npm, matching the frontend's recorded Vite engine requirement.
+- Node.js 22.13+ within the Node 22 release line, or Node.js 24+, and npm. These versions satisfy both the recorded Vite and ESLint engine requirements.
 - A Firebase project with Authentication and Cloud Firestore configured.
 - A Finnhub API key for market data.
 - At least one AI provider key: Groq, OpenRouter, or Gemini.
@@ -253,11 +255,10 @@ BASE_RPC_URL=http://127.0.0.1:8545
 
 OPPORTUNITY_SCAN_INTERVAL_MINUTES=30
 TOP_N_OPPORTUNITIES=5
-PAPER_CASH_USD=10000
-PAPER_PORTFOLIO_VALUE_USD=10000
+USD_MYR_RATE=4.30
 ```
 
-The local RPC URL assumes that a compatible local node or Base fork is already running; follow the Git Bash instructions below to start one. Wallet features are disabled when the private key is empty. Dry-run mode prevents blockchain transaction submission but can still require network access for quotes and previews. It is not a testnet deployment.
+The local RPC URL assumes that a compatible local node or Base fork is already running; follow the Git Bash instructions below to start one. Anvil-funded stock simulations and blockchain wallet features require the configured wallet key and a running local Base Anvil fork. Dry-run mode prevents blockchain transaction submission but can still require network access for quotes and previews. It is not a testnet deployment.
 
 [Back to navigation](#navigation)
 
@@ -348,13 +349,33 @@ WALLET_PRIVATE_KEY=replace_with_anvil_account_0_private_key
 FORCE_DRY_RUN=true
 ```
 
-Restart the backend after editing `.env`, then check the wallet balance in the application. Keep Anvil running alongside the backend and frontend. To activate the Python environment from Git Bash, run `source venv/Scripts/activate` from the repository root.
+Restart the backend after editing `.env`, then refresh the wallet in the application. The wallet shows both Anvil ETH/USDC and the available stock-simulation balance. Funding USDC increases the simulation balance on the next refresh; funding ETH changes only the ETH display. Keep Anvil running alongside the backend and frontend. To activate the Python environment from Git Bash, run `source venv/Scripts/activate` from the repository root.
 
 `FORCE_DRY_RUN=true` keeps option fills in preview mode. To test actual transaction submission **on this local fork**, set it to `false` only while `BASE_RPC_URL` points to your local Anvil node, then restart the backend. Thetanuts quotes and previews may still depend on external services; funding the wallet alone does not guarantee an available or executable option order.
 
 Stopping Anvil and starting a fresh instance resets the local funding and transactions, so repeat the funding steps after a reset. Do not send real funds to Anvil's publicly known development accounts.
 
 [Back to navigation](#navigation)
+
+### Anvil-funded stock simulation balance
+
+Stock trades remain simulated; they do **not** transfer USDC on-chain or buy real shares. The application reads the configured wallet from a loopback Anvil RPC, checks that it is Anvil, and uses its USDC as funding. Read-only stock funding accepts the existing local Anvil chain ID; actual options execution still requires `8453`:
+
+```text
+Available simulated USDC = current Anvil USDC - simulated BUY costs + simulated SELL proceeds
+Portfolio value = available simulated USDC + current simulated stock value
+```
+
+For example, 10,000 Anvil USDC minus a simulated 1,200 purchase leaves 8,800 available. Adding another 2,000 USDC on Anvil increases available funds to 10,800. A simulated sale for 1,300 raises it to 12,100. These trades leave the actual Anvil USDC unchanged. ETH is displayed separately and is not included in stock portfolio value.
+
+- Refresh funding using the wallet refresh button; the UI also refreshes periodically.
+- Existing paper trade history is imported as the simulation's net spending. The old artificial starting cash is not added again.
+- The simulated spending adjustment, holdings and trade record update together in a Firestore transaction.
+- The old artificial cash-reset endpoint is disabled. Use the Anvil USDC funding steps above instead.
+- If Anvil is unavailable or its balance drops below simulated net spending, the app reports an error and blocks stock funding rather than inventing cash.
+- Restarting/resetting Anvil does not erase Firestore stock holdings or simulated spending. Restore funding for the same wallet. Changing the configured wallet address is blocked for an existing funded simulation account.
+- This is a local demo: the server uses one configured Anvil wallet. Each Firebase user has a separate simulated spending adjustment against that funding; these are independent simulations, not individually allocated on-chain wallets.
+- `FORCE_DRY_RUN` controls the options workflow. Stock simulations never submit blockchain transactions, regardless of that flag.
 
 ### 5. Configure the frontend
 
@@ -400,7 +421,7 @@ Starting `app.py` also starts the background opportunity scanner, which uses the
 
 ### 7. Development checks
 
-Run the existing execution routing tests from the repository root:
+Run the backend regression tests from the repository root (routing, chat intent, confirmations, opportunity activity, and stock accounting):
 
 ```sh
 cd backend
@@ -427,7 +448,7 @@ AmanahAI/
 |   |-- investment/          # Screening, ranking, and scheduled scans
 |   |-- services/            # Portfolio, execution, and notification services
 |   |-- trading/             # Contract selection and validation
-|   |-- tests/               # Execution routing tests
+|   |-- tests/               # Routing, intent, confirmation, and accounting tests
 |   |-- app.py               # Flask entry point
 |   `-- thetanuts_trader.py   # Blockchain wallet and options integration
 |-- frontend/

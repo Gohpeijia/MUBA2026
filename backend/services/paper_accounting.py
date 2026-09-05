@@ -57,10 +57,14 @@ def apply_fill(account, symbol, decision, quantity, price, name=''):
         })
     elif holding:
         portfolio.remove(holding)
-    return {
+    updates = {
         'portfolio': portfolio, 'paperCashUsd': float(cash),
         'realizedPnlUsd': float(money(number(account.get('realizedPnlUsd', 0)) + realized)),
-    }, {'value': float(value), 'realizedPnlUsd': float(money(realized))}
+    }
+    if 'anvilPaperAdjustmentUsd' in account:
+        delta = -value if decision == 'BUY' else value
+        updates['anvilPaperAdjustmentUsd'] = float(money(number(account['anvilPaperAdjustmentUsd']) + delta))
+    return updates, {'value': float(value), 'realizedPnlUsd': float(money(realized))}
 
 
 def settle_paper_trade(user_id, symbol, decision, quantity, price, name='', reason=''):

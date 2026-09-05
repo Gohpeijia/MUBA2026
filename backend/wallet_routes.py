@@ -27,10 +27,20 @@ trader = ThetanutsTrader()
 @wallet_bp.route('/paper-balance', methods=['GET'])
 @require_auth
 def get_paper_wallet_balance():
-    cash = get_paper_cash_balance(g.uid)
-    return jsonify({"success": True, "data": {
-        "ok": True, "paper_cash_usd": cash, "paper_tradable_usd": cash,
-    }})
+    try:
+        cash = get_paper_cash_balance(g.uid)
+        from firebase_config import db
+        account = db.collection('users').document(g.uid).get().to_dict() or {}
+        return jsonify({"success": True, "data": {
+            "ok": True, "paper_cash_usd": cash, "paper_tradable_usd": cash,
+            "usdc": account.get('anvilFundingUsdc'), "eth": account.get('anvilFundingEth'),
+            "address": account.get('anvilFundingAddress'),
+            "simulation_adjustment_usd": account.get('anvilPaperAdjustmentUsd'),
+            "balance_source": "ANVIL_FUNDED_SIMULATION",
+        }})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
 
 
 @wallet_bp.route('/balance', methods=['GET'])
@@ -72,12 +82,7 @@ def get_wallet_transactions():
 @wallet_bp.route('/reset-paper-cash', methods=['POST'])
 @require_auth
 def reset_wallet_paper_cash():
-    reset_paper_cash(g.uid)
-
     return jsonify({
-        "success": True,
-        "data": {
-            "paper_cash_usd": 10000.00,
-            "message": "Paper cash reset to $10,000."
-        }
-    })
+        "success": False,
+        "error": "Fund the configured Anvil wallet with USDC, then refresh. Artificial cash resets are disabled.",
+    }), 409

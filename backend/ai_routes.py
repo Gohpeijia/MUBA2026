@@ -1,3 +1,4 @@
+from services.chat_intent import explicit_trade_action
 # ai_routes.py
 from flask import Blueprint, request, jsonify, g
 from ai_agent import AIAgent, trader, _log_thetanuts_trade, FORCE_DRY_RUN
@@ -421,6 +422,12 @@ def chat_with_agent():
         # (or produces the same safe dry-run preview while FORCE_DRY_RUN is
         # enabled). Alert-only mode never exposes an executable action to
         # the frontend.
+        # Enforce consent at the API boundary even if an agent returns a proposal.
+        if explicit_trade_action(user_message) is None:
+            result["trade_proposal"] = None
+            result["trade_status"] = "RECOMMEND_ONLY"
+            result["trade_reason"] = "Analysis only. No trade was requested."
+
         if result.get("trade_status") == "EXECUTABLE":
             copilot_mode = _execution_mode(preferences)
             proposal = result.get("trade_proposal")

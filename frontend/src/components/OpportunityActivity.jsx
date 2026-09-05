@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 const STATUS_LABELS = {
@@ -10,6 +11,8 @@ const STATUS_LABELS = {
 };
 
 export default function OpportunityActivity({ items, error }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleItems = expanded ? items : items.slice(0, 3);
   return (
     <section className="inv-card inv-card--wide" id="ai-activity">
       <div className="inv-card-head">
@@ -18,8 +21,8 @@ export default function OpportunityActivity({ items, error }) {
       <p className="inv-card-sub">Recent recommendations and execution results. Completed trades appear in Trade History below.</p>
       {error && <p role="status">{error}</p>}
       {!error && items.length === 0 && <p className="inv-card-sub">No AI activity yet. Run a scan to look for opportunities.</p>}
-      <div className="trade-list">
-        {items.map((item) => (
+      <div className="trade-list" id="ai-activity-list">
+        {visibleItems.map((item) => (
           <article className="trade-row" key={item.id}>
             <span className={`trade-badge trade-badge--${String(item.decision).toLowerCase()}`}>{item.decision || 'Signal'}</span>
             <div className="trade-row-main">
@@ -39,6 +42,17 @@ export default function OpportunityActivity({ items, error }) {
           </article>
         ))}
       </div>
+      {items.length > 3 && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls="ai-activity-list"
+          onClick={() => setExpanded(value => !value)}
+          style={{ background: 'none', border: 0, padding: '12px 0 0', color: 'var(--teal, #176b6b)', font: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}
+        >
+          {expanded ? 'Less' : 'More'}
+        </button>
+      )}
     </section>
   );
 }

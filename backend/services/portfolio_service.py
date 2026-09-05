@@ -215,8 +215,8 @@ def get_total_portfolio_value(user_id: str) -> float:
     return _to_float(get_portfolio_state(user_id).get("total_value"))
 
 
-def _paper_cash_from_trades(user_id: str) -> float:
-    cash = DEFAULT_PAPER_CASH_USD
+def _paper_cash_from_trades(user_id: str, starting_cash: float = 0.0) -> float:
+    cash = starting_cash
     try:
         trades = db.collection("users").document(user_id).collection("trades").stream()
         for trade in trades:
@@ -242,35 +242,43 @@ def _paper_cash_from_trades(user_id: str) -> float:
 
 
 def get_paper_cash_balance(user_id: str) -> float:
+    """Live Anvil funding plus this user's simulated trade cash movements."""
+    from services.anvil_funding import read_anvil_funding
+    from services.paper_accounting import money
+
+    funding = read_anvil_funding()
+    address = funding['address'].lower()
     user_ref = db.collection("users").document(user_id)
-    snap = user_ref.get()
-    data = snap.to_dict() if snap.exists else {}
+    existing = user_ref.get().to_dict() or {}
+    # Import existing paper fills once; do not import the old artificial deposit.
+    initial_adjustment = (_paper_cash_from_trades(user_id)
+                          if existing.get('anvilPaperAdjustmentUsd') is None else None)
 
-    logger.info(
-        "PAPER CASH DEBUG user=%s paperCashUsd=%s version=%s",
-        user_id,
-        data.get("paperCashUsd"),
-        data.get("paperCashVersion"),
-    )
-
-    if (
-        isinstance(data, dict)
-        and data.get("paperCashUsd") is not None
-        and data.get("paperCashVersion") == PAPER_CASH_VERSION
-    ):
-        return round(_to_float(data.get("paperCashUsd"), DEFAULT_PAPER_CASH_USD), 2)
-
-    cash = _paper_cash_from_trades(user_id)
     @firestore.transactional
-    def initialize(transaction):
+    def synchronize(transaction):
         current = user_ref.get(transaction=transaction).to_dict() or {}
-        if current.get("paperCashVersion") == PAPER_CASH_VERSION and current.get("paperCashUsd") is not None:
-            return float(current["paperCashUsd"])
-        transaction.set(user_ref, {
-            "paperCashUsd": cash, "paperCashVersion": PAPER_CASH_VERSION,
-        }, merge=True)
+        previous_address = current.get('anvilFundingAddress')
+        if previous_address and previous_address != address:
+            raise ValueError('Anvil wallet changed. Restore the configured wallet before using this simulation account.')
+        adjustment = current.get('anvilPaperAdjustmentUsd')
+        if adjustment is None:
+            if initial_adjustment is None:
+                raise ValueError('Simulation account changed during funding refresh. Retry.')
+            adjustment = initial_adjustment
+        cash = float(money(funding['usdc']) + money(adjustment))
+        if cash < 0:
+            raise ValueError('Anvil funding is below simulated spending. Add USDC to the same Anvil wallet.')
+        updates = {
+            'paperCashUsd': cash, 'paperCashVersion': PAPER_CASH_VERSION,
+            'anvilPaperAdjustmentUsd': adjustment,
+            'anvilFundingAddress': address,
+            'anvilFundingUsdc': funding['usdc'], 'anvilFundingEth': funding['eth'],
+        }
+        if any(current.get(key) != value for key, value in updates.items()):
+            transaction.set(user_ref, updates, merge=True)
         return cash
-    return initialize(db.transaction())
+
+    return synchronize(db.transaction())
 
 
 def adjust_paper_cash(user_id: str, delta: float) -> float:
