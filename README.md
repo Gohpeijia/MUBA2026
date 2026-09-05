@@ -1,12 +1,69 @@
 # AmanahAI
 
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)
+![Base](https://img.shields.io/badge/Base-0052FF?style=for-the-badge&logo=base&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=white)
+
 AmanahAI is an AI-assisted investment and portfolio management application that brings market research, personalised risk preferences, and blockchain options workflows into one dashboard.
+
+**Explore markets. Understand the reasoning. Review the action.**
+
+## Navigation
+
+| Explore the project | Set up and run |
+| --- | --- |
+| [Description](#description) | [Prerequisites](#prerequisites) |
+| [Demo](#demo) | [Install Dependencies](#1-install-javascript-dependencies) |
+| [Key Features](#key-features) | [Configure Firebase](#3-configure-firebase) |
+| [Architecture](#architecture) | [Fund the Demo Wallet](#c-add-10000-local-usdc) |
+| [Problem Statement](#problem-statement) | [Setup and Installation](#setup-and-installation) |
+| [Blockchain Technology](#blockchain-technology-used) | [Anvil and Virtual Funds](#set-up-anvil-and-virtual-funds-windows-git-bash) |
+| [Contract Addresses](#smart-contract-addresses-local-fork--testnet) | [Start the Application](#6-start-the-application) |
+| [Project Structure](#project-structure) | [Development Checks](#7-development-checks) |
+| [Team Members](#team-members) | [Configuration: Backend](#4-configure-the-backend) · [Frontend](#5-configure-the-frontend) |
+
+<details>
+<summary><strong>Step-by-step setup links</strong></summary>
+
+1. [Install JavaScript dependencies](#1-install-javascript-dependencies)
+2. [Create a Python environment](#2-create-a-python-environment)
+3. [Configure Firebase](#3-configure-firebase)
+4. [Configure the backend](#4-configure-the-backend)
+5. [Set up Anvil and virtual funds](#set-up-anvil-and-virtual-funds-windows-git-bash)
+   - [Install Foundry](#a-install-foundry)
+   - [Start a Base mainnet fork](#b-start-a-base-mainnet-fork)
+   - [Add 10,000 local USDC](#c-add-10000-local-usdc)
+   - [Connect the funded account](#d-connect-amanahai-to-the-funded-account)
+6. [Configure the frontend](#5-configure-the-frontend)
+7. [Start the application](#6-start-the-application)
+8. [Run development checks](#7-development-checks)
+
+</details>
+
+---
 
 ## Description
 
 The application combines a React frontend with a Python Flask backend. Specialist AI agents analyse technical indicators, company fundamentals, news, and risk, then combine their findings into investment recommendations. Users can explore stocks, manage a paper portfolio, review opportunities, and choose how recommendations are handled.
 
-Core features include:
+## Demo
+
+Follow this walkthrough after [starting the application](#6-start-the-application):
+
+| Screen | What to explore |
+| --- | --- |
+| **Investment dashboard** | Review opportunities and your portfolio alongside saved risk preferences. |
+| **AI advisor** | Ask about an asset and inspect the analysis behind a recommendation. |
+| **Wallet and transaction preview** | Check local ETH/USDC balances and preview a supported BTC or ETH option proposal with `FORCE_DRY_RUN=true`. |
+
+*Dashboard, AI analysis, and wallet preview screenshots are pending capture.*
+
+<!-- Add real application captures here when available. Keep private keys, API credentials, and personal account information out of screenshots. -->
+
+[Back to navigation](#navigation)
+
+## Key Features
 
 - Email/password and Google sign-in through Firebase Authentication.
 - Investment preferences, risk settings, and portfolio tracking.
@@ -18,6 +75,8 @@ Core features include:
 - In-app notifications and optional Firebase push notifications.
 - Blockchain wallet balance checks, transaction previews, and transaction history.
 
+[Back to navigation](#navigation)
+
 ## Problem Statement
 
 Retail investors often need to move between separate tools to research assets, interpret news, assess risk, track their portfolios, and act on investment opportunities. This fragmented process makes it difficult to turn market information into consistent decisions that reflect an investor's preferences.
@@ -25,6 +84,62 @@ Retail investors often need to move between separate tools to research assets, i
 Blockchain options introduce additional steps: selecting a suitable contract, checking collateral and gas balances, approving token spending, and confirming execution. These steps can be difficult to connect with the research that motivated the trade.
 
 AmanahAI addresses this by bringing research, portfolio context, risk-aware recommendations, and supported execution workflows together. It helps users review the reasoning behind opportunities and choose their preferred level of involvement before taking action.
+
+[Back to navigation](#navigation)
+
+## Architecture
+
+The React interface sends requests to Flask. Backend services coordinate market data, AI analysis, user preferences, and trade execution. The diagram below shows the main analysis and option BUY flow; supported RFQ position closes follow a separate CLI path described below.
+
+```mermaid
+flowchart TD
+    UI["React dashboard and AI advisor"] <-->|"Requests and responses"| API
+    UI <--> FB["Firebase Auth and Firestore"]
+    FCM["Firebase Cloud Messaging"] -->|"Push notifications"| UI
+
+    subgraph BACKEND["Python Flask backend"]
+        API["Flask routes"] --> ORCH["Analysis orchestration<br/>Market snapshot and screening"]
+        SCAN["APScheduler<br/>Buy and portfolio sell scans"] --> ORCH
+        ORCH --> AI["Technical, fundamental and news agents<br/>Run in parallel"]
+        AI --> RISK["Risk agent<br/>Reviews specialist reports"]
+        AI --> COMMITTEE["Committee agent"]
+        RISK --> COMMITTEE
+        COMMITTEE -->|"Analysis result"| API
+        API -->|"User action"| ROUTER
+        COMMITTEE -->|"Scheduled opportunity dispatch"| ROUTER
+        ROUTER["Proposal preparation and action services<br/>Preferences, confirmation and validation"] --> PAPER["Paper equity execution"]
+        ROUTER <--> TRADER["ThetanutsTrader<br/>Orders, wallet checks and BUY fills"]
+        TRADER -->|"Preview or execution result"| API
+    end
+
+    DATA["Finnhub and Yahoo Finance"] --> ORCH
+    LLM["Groq / OpenRouter / Gemini"] <--> AI
+    LLM <--> RISK
+    LLM <--> COMMITTEE
+    API <--> FB
+    PAPER --> FB
+    ROUTER --> FCM
+    TRADER <-->|"Orders and BUY preview calldata"| CLI["Thetanuts CLI"]
+    TRADER <-->|"Web3.py: reads; signs BUY transactions only outside dry-run"| BASE["Base RPC<br/>Anvil fork for local demo<br/>USDC and Thetanuts contracts"]
+
+    classDef interface fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e;
+    classDef intelligence fill:#ede9fe,stroke:#7c3aed,color:#3b0764;
+    classDef chain fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class UI,API interface;
+    class ORCH,AI,RISK,COMMITTEE intelligence;
+    class TRADER,CLI,BASE chain;
+```
+
+Implementation details:
+
+- **AI sequence:** technical, fundamental, and news reports run in parallel. The risk agent reviews those reports, then the committee combines all four. AI output is passed to application services; the agents do not sign transactions.
+- **Action modes:** manual and alert-only modes do not automatically execute. Confirmation mode waits for user approval; automated mode can dispatch a prepared proposal without a user click. Unsupported assets remain recommendation-only.
+- **Option BUY:** the CLI supplies orders and fresh preview calldata. With dry-run disabled, `ThetanutsTrader` uses Web3.py to validate the chain and balances, approve USDC when necessary, submit the fill, and check receipts. Responses return through Flask to React.
+- **Option SELL:** only supported RFQ positions can be closed. `close_rfq_position()` delegates to the CLI's `position close` command; it does not use the BUY signing path. OptionBook exits are not implemented by this close flow.
+- **State and notifications:** Firebase handles authentication, Firestore stores application data, and Cloud Messaging delivers optional push notifications. The backend also records fill attempts in a local JSONL log.
+- **Local fork:** the backend RPC is `http://127.0.0.1:8545` for the demo. CLI subprocesses inherit the environment, but the wrapper does not pass an explicit RPC flag; the CLI's effective network configuration must also be checked for local-fork execution.
+
+[Back to navigation](#navigation)
 
 ## Blockchain Technology Used
 
@@ -50,6 +165,8 @@ The demo uses a local fork of Base mainnet. These are fork-based testing details
 - **Demo Trading Wallet:** `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (Anvil Account #0). This is a wallet address, not a smart contract address.
 
 The local fork must use chain ID `8453` to match the backend's live fill validation. Configure the backend RPC to point to the local fork. The Anvil demo account is for local testing only; its default private key is publicly known.
+
+[Back to navigation](#navigation)
 
 ## Setup and Installation
 
@@ -142,6 +259,8 @@ PAPER_PORTFOLIO_VALUE_USD=10000
 
 The local RPC URL assumes that a compatible local node or Base fork is already running; follow the Git Bash instructions below to start one. Wallet features are disabled when the private key is empty. Dry-run mode prevents blockchain transaction submission but can still require network access for quotes and previews. It is not a testnet deployment.
 
+[Back to navigation](#navigation)
+
 ### Set up Anvil and virtual funds (Windows Git Bash)
 
 Use **Git Bash** for the commands in this section. The ETH and USDC created here exist only on your local fork and have no real monetary value.
@@ -174,6 +293,9 @@ Keep this terminal running. The upstream endpoint supplies Base state; the app w
 Anvil prints its development accounts and their private keys. Account #0 is `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` with the default mnemonic. The command funds each development account with 10,000 local ETH. See [Anvil's account and forking documentation](https://www.getfoundry.sh/anvil/index.html).
 
 #### C. Add 10,000 local USDC
+
+<details>
+<summary><strong>Click to expand: Commands to mint 10,000 local USDC</strong></summary>
 
 In a **second Git Bash terminal**, define the local RPC and addresses:
 
@@ -214,6 +336,8 @@ cast balance "$DEMO_WALLET" --ether --rpc-url "$LOCAL_RPC_URL"
 
 On a fresh fork, the USDC balance should be `10000000000` raw units, equivalent to **10,000 USDC**. Running the minting sequence again adds another 10,000 USDC. If a transaction reverts, stop and inspect the error; this procedure assumes the forked token exposes these interfaces and is not paused.
 
+</details>
+
 #### D. Connect AmanahAI to the funded account
 
 Update these entries in `backend/.env`, copying the private key for **Account #0** from your Anvil terminal:
@@ -229,6 +353,8 @@ Restart the backend after editing `.env`, then check the wallet balance in the a
 `FORCE_DRY_RUN=true` keeps option fills in preview mode. To test actual transaction submission **on this local fork**, set it to `false` only while `BASE_RPC_URL` points to your local Anvil node, then restart the backend. Thetanuts quotes and previews may still depend on external services; funding the wallet alone does not guarantee an available or executable option order.
 
 Stopping Anvil and starting a fresh instance resets the local funding and transactions, so repeat the funding steps after a reset. Do not send real funds to Anvil's publicly known development accounts.
+
+[Back to navigation](#navigation)
 
 ### 5. Configure the frontend
 
@@ -290,6 +416,8 @@ npm run lint
 
 The frontend build output is written to `frontend/dist`. These commands do not deploy the application or any smart contracts.
 
+[Back to navigation](#navigation)
+
 ## Project Structure
 
 ```text
@@ -310,8 +438,12 @@ AmanahAI/
 `-- README.md
 ```
 
+[Back to navigation](#navigation)
+
 ## Team Members
 
 - Goh Pei Jia
 - Coshin Lee
 - Ryan
+
+[Back to navigation](#navigation)
