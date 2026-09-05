@@ -7,6 +7,16 @@ import { useAIAdvisor } from './AIAdvisorContext';
 const BASESCAN_TX_URL = 'https://basescan.org/tx/';
 
 const STATUS_META = {
+  PAPER_EXECUTED: {
+  label: 'Paper trade executed',
+  color: '#1a9e5c',
+  bg: '#e8f8f0'
+},
+PAPER_FAILED: {
+  label: 'Paper trade failed',
+  color: '#c0392b',
+  bg: '#fbeaea'
+},
   EXECUTED:                   { label: 'Executed on-chain',            color: '#1a9e5c', bg: '#e8f8f0' },
   DRY_RUN_OK:                  { label: 'Dry run only — not sent',      color: '#a8710a', bg: '#fdf3e0' },
   FAILED:                      { label: 'Failed',                       color: '#c0392b', bg: '#fbeaea' },
@@ -41,9 +51,32 @@ function fmtPrice(price) {
   return Number.isFinite(n) ? `$${n.toFixed(4)}` : String(price);
 }
 
-function TermsLine({ selector }) {
-  if (!selector) return <span style={{ color: '#999' }}>—</span>;
+function TermsLine({ selector, trade }) {
+  // Paper equity trade
+  if (trade?.execution_target === 'PAPER_EQUITY') {
+    const shares = trade.shares ?? trade.quantity ?? trade.qty;
+    const price = trade.price;
+
+    return (
+      <span>
+        {shares != null ? `${shares} shares` : '—'}
+        {' · '}
+        Price {fmtStrike(price)}
+        {' · '}
+        Value {trade.estimated_value != null
+          ? `$${Number(trade.estimated_value).toFixed(2)}`
+          : '—'}
+      </span>
+    );
+  }
+
+  // Thetanuts option trade
+  if (!selector) {
+    return <span style={{ color: '#999' }}>—</span>;
+  }
+
   const price = selector.previewed_price ?? selector.price;
+
   return (
     <span>
       {selector.option_type || '—'} · Strike {fmtStrike(selector.strike)} · Expiry{' '}
@@ -88,6 +121,11 @@ export default function TradeResultCard({ trade, onDismiss }) {
 
   const exec = trade.thetanuts_execution;
   const status = exec?.status;
+
+  const isPaperEquity =
+  trade.execution_target === 'PAPER_EQUITY' ||
+  trade.asset_type === 'EQUITY';
+
   const isPendingProposal = !status;
   const meta = STATUS_META[status] || (
     isPendingProposal
@@ -169,7 +207,16 @@ export default function TradeResultCard({ trade, onDismiss }) {
         )}
       </div>
 
-      {trade.proposed_amount_usdc != null && (
+      {isPaperEquity ? (
+        <div style={{ color: '#555', marginBottom: 6 }}>
+          {trade.shares ?? trade.quantity ?? 0} shares
+          {trade.price != null && <> · ${Number(trade.price).toFixed(2)} per share</>}
+          {trade.estimated_value != null && (
+            <> · Estimated value ${Number(trade.estimated_value).toFixed(2)}</>
+          )}
+          {trade.risk_tolerance && <> · {trade.risk_tolerance} risk</>}
+        </div>
+      ) : trade.proposed_amount_usdc != null && (
         <div style={{ color: '#555', marginBottom: 6 }}>
           Proposed {trade.proposed_amount_usdc} USDC
           {trade.wallet_tradable_usdc != null && (
@@ -207,7 +254,8 @@ export default function TradeResultCard({ trade, onDismiss }) {
             <div>
               <div>Preview ready — nothing has been sent on-chain yet.</div>
               <div style={{ marginTop: 3, color: '#666' }}>
-                <TermsLine selector={trade.confirm_selector} />
+                <TermsLine selector={trade.confirm_selector} 
+                trade={trade} />
               </div>
             </div>
           </div>
@@ -266,7 +314,7 @@ export default function TradeResultCard({ trade, onDismiss }) {
                 Previously shown
               </div>
               <div style={{ color: '#666', marginTop: 2 }}>
-                <TermsLine selector={exec.previous} />
+                <TermsLine selector={exec.previous} trade={trade} />
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -274,7 +322,7 @@ export default function TradeResultCard({ trade, onDismiss }) {
                 Current on book
               </div>
               <div style={{ color: '#666', marginTop: 2 }}>
-                <TermsLine selector={exec.current} />
+                <TermsLine selector={exec.current} trade={trade} />
               </div>
             </div>
           </div>

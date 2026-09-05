@@ -512,31 +512,9 @@ def confirm_trade():
         # BUY requires collateral.
         # SELL does NOT — the collateral already belongs to the
         # existing option position.
-        if (
-            not ticker
-            or not option_type
-            or expected_strike is None
-            or not expected_expiry
-        ):
-            return jsonify({
-                "success": False,
-                "error": "Incomplete trade selector — nothing to confirm.",
-            }), 400
+        
 
-        if decision == "BUY":
-            collateral_usdc, collateral_error = _parse_positive_float(
-                collateral_usdc,
-                "collateral_usdc",
-            )
-            if collateral_error:
-                return jsonify({
-                    "success": False,
-                    "error": f"BUY requires valid collateral_usdc: {collateral_error}",
-                }), 400
-
-        else:
-            # SELL does not use collateral_usdc.
-            collateral_usdc = None
+        
 
         # ---------------------------------------------------------------
         # 1. Server-side copilot mode check
@@ -553,6 +531,130 @@ def confirm_trade():
                     f"'{copilot_mode}' mode."
                 ),
             }), 400
+
+         # ===============================================================
+        # PAPER EQUITY SELL
+        # ===============================================================
+        
+        execution_target = (
+            selector.get("execution_target")
+            or data.get("execution_target")
+        )
+        proposal_data = (
+            data.get("proposal")
+            or data.get("trade_proposal")
+            or selector
+        )
+        if isinstance(proposal_data, dict):
+            execution_target = (
+                execution_target
+                or proposal_data.get("execution_target")
+            )
+        if decision == "SELL" and execution_target == "PAPER_EQUITY":
+        
+            # Frontend sends Paper Equity fields at the top level,
+            # unlike Thetanuts which uses selector.
+            proposal = dict(proposal_data or {})
+            proposal["execution_target"] = "PAPER_EQUITY"
+            proposal["decision"] = "SELL"
+            proposal["action"] = "SELL"
+            # -----------------------------------------------------------
+            # Read symbol from the top-level request first.
+            # Frontend sends:
+            #   symbol: "MU"
+            #   ticker: "MU"
+            # -----------------------------------------------------------
+            proposal["symbol"] = (
+                proposal.get("symbol")
+                or data.get("symbol")
+                or data.get("ticker")
+                or selector.get("symbol")
+                or selector.get("ticker")
+                or selector.get("underlying")
+            )
+            proposal["ticker"] = (
+                proposal.get("ticker")
+                or data.get("ticker")
+                or proposal.get("symbol")
+            )
+            # Preserve the quantity sent by the frontend.
+            proposal["shares"] = (
+                proposal.get("shares")
+                if proposal.get("shares") is not None
+                else data.get("shares")
+            )
+            proposal["quantity"] = (
+                proposal.get("quantity")
+                if proposal.get("quantity") is not None
+                else data.get("quantity")
+            )
+            # Preserve the preview price if supplied.
+            if proposal.get("price") is None:
+                proposal["price"] = data.get("price")
+            # Safety check before execution.
+            if not proposal.get("symbol"):
+                return jsonify({
+                    "success": False,
+                    "error": "Paper equity SELL requires symbol.",
+                }), 400
+            execution_result = execute_prepared_proposal(
+                user_id=user_id,
+                proposal=proposal,
+                action=data.get("action", "CONFIRM"),
+            )
+            if not execution_result.get("ok"):
+                return jsonify({
+                    "success": False,
+                    "error": execution_result.get(
+                        "error",
+                        "Paper SELL execution failed."
+                    ),
+                    "data": {
+                        "decision": "SELL",
+                        "execution": execution_result,
+                    },
+                }), 409
+            return jsonify({
+                "success": True,
+                "data": {
+                    "decision": "SELL",
+                    "status": execution_result.get(
+                        "status",
+                        "PAPER_EXECUTED"
+                    ),
+                    "execution": execution_result,
+                    "dry_run": False,
+                },
+            })
+
+        # ---------------------------------------------------------------
+        # Thetanuts trades require a complete option selector.
+        # Paper equity SELL has already returned above.
+        # ---------------------------------------------------------------
+        if (
+            not ticker
+            or not option_type
+            or expected_strike is None
+            or not expected_expiry
+        ):
+            return jsonify({
+                "success": False,
+                "error": "Incomplete trade selector — nothing to confirm.",
+            }), 400
+
+        if decision == "BUY":
+            collateral_usdc, collateral_error = _parse_positive_float(
+                collateral_usdc,
+                "collateral_usdc",
+            )
+
+            if collateral_error:
+                return jsonify({
+                    "success": False,
+                    "error": f"BUY requires valid collateral_usdc: {collateral_error}",
+                }), 400
+        else:
+            collateral_usdc = None
 
         # ===============================================================
         # BUY
@@ -816,10 +918,14 @@ def confirm_trade():
         # ===============================================================
         # SELL
         # ===============================================================
-
+        
         # ---------------------------------------------------------------
         # 2B. SELL MUST use the live position, not the order book
         # ---------------------------------------------------------------
+        # BUY requires collateral.
+        # SELL does NOT — the collateral already belongs to the
+        # existing option position.
+        
         live_position = trader.find_position(
             underlying=ticker,
             option_type=option_type,

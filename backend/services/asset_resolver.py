@@ -99,6 +99,19 @@ ASSET_ALIAS_DATABASE = {
     "NVIDIA":           {"symbol": "NVDA",   "name": "NVIDIA Corporation", "asset_type": "EQUITY_US", "currency": "USD"},
     "NVDA":             {"symbol": "NVDA",   "name": "NVIDIA Corporation", "asset_type": "EQUITY_US", "currency": "USD"},
     "NVDIA":            {"symbol": "NVDA",   "name": "NVIDIA Corporation", "asset_type": "EQUITY_US", "currency": "USD"},
+    "MICRON": {
+    "symbol": "MU",
+    "name": "Micron Technology Inc.",
+    "asset_type": "EQUITY_US",
+    "currency": "USD"
+},
+
+"MU": {
+    "symbol": "MU",
+    "name": "Micron Technology Inc.",
+    "asset_type": "EQUITY_US",
+    "currency": "USD"
+},
     "TESLA":            {"symbol": "TSLA",   "name": "Tesla Inc.", "asset_type": "EQUITY_US", "currency": "USD"},
     "TSLA":             {"symbol": "TSLA",   "name": "Tesla Inc.", "asset_type": "EQUITY_US", "currency": "USD"},
     "META":             {"symbol": "META",   "name": "Meta Platforms Inc. (Facebook)", "asset_type": "EQUITY_US", "currency": "USD"},

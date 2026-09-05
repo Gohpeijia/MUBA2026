@@ -148,11 +148,18 @@ class AIAgent:
         # ── 2. IF ASSET RESOLVED -> TRIGGER MULTI-AGENT INVESTMENT INTELLIGENCE ──
         if resolved_asset:
             sym = resolved_asset["symbol"]
-            canonical_name = resolved_asset["canonical_name"]
+            canonical_name = (
+                resolved_asset.get("canonical_name")
+                or resolved_asset.get("name")
+                or sym
+            )
+            asset_type = resolved_asset.get("asset_type", "")
         
             print(
                 f"🎯 [AIAgent] Asset resolved: '{user_input}' -> "
-                f"{canonical_name} ({sym}). Triggering 5-Agent Intelligence..."
+                f"{canonical_name} ({sym}) | "
+                f"asset_type={asset_type}. "
+                f"Triggering 5-Agent Intelligence..."
             )
         
             try:
@@ -251,18 +258,30 @@ class AIAgent:
                     trader=trader,
                     spot_price=spot_price,
                     explicit_user_action=explicit_action,
+                    asset_type=asset_type,
                 )
         
                 # Append trade status
                 if trade_result["status"] == "EXECUTABLE":
                     prop = trade_result["proposal"]
-        
-                    summary_md += (
-                        f"\n\n---\n"
-                        f"🔗 **Live Thetanuts Contract Found** · "
-                        f"{prop['option_type']} Strike: `{prop['strike']}` · "
-                        f"Collateral: `{prop['collateral_usdc']} USDC`"
-                    )
+
+                    if prop.get("execution_target") == "PAPER_EQUITY":
+                        summary_md += (
+                            f"\n\n---\n"
+                            f"📋 **Paper Equity Trade Ready** · "
+                            f"{prop.get('action', trade_decision)} "
+                            f"`{prop.get('symbol', sym)}` · "
+                            f"Quantity: `{prop.get('quantity', prop.get('shares', 0))}` shares · "
+                            f"Price: `${prop.get('price', spot_price)}`"
+                        )
+
+                    elif prop.get("execution_target") == "THETANUTS_OPTION":
+                        summary_md += (
+                            f"\n\n---\n"
+                            f"🔗 **Live Thetanuts Contract Found** · "
+                            f"{prop['option_type']} Strike: `{prop['strike']}` · "
+                            f"Collateral: `{prop['collateral_usdc']} USDC`"
+                        )
         
                 elif trade_decision in ("BUY", "SELL"):
                     summary_md += (

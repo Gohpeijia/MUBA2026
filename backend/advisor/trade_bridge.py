@@ -27,6 +27,7 @@
 
 import logging
 from typing import Optional
+from services.equity_execution_service import prepare_equity_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,44 @@ def _find_live_rfq_position(trader, symbol: str) -> dict:
 
     return {"ok": True, "position": matches[0], "error": None}
 
+def _find_paper_equity_position(portfolio: dict, symbol: str) -> dict | None:
+    positions = (
+        portfolio.get("positions", {})
+        if isinstance(portfolio, dict)
+        else {}
+    )
+
+    if not isinstance(positions, dict):
+        return None
+
+    target = str(symbol or "").strip().upper()
+
+    for raw_symbol, position in positions.items():
+        if str(raw_symbol or "").strip().upper() != target:
+            continue
+
+        if not isinstance(position, dict):
+            return None
+
+        try:
+            quantity = float(
+                position.get(
+                    "quantity",
+                    position.get(
+                        "shares",
+                        position.get("qty", 0),
+                    ),
+                )
+            )
+        except (TypeError, ValueError):
+            quantity = 0
+
+        if quantity > 0:
+            return position
+
+        return None
+
+    return None
 
 def _build_buy_proposal(
     symbol: str,
@@ -296,28 +335,72 @@ def _build_sell_proposal(
     symbol: str,
     investment_analysis: dict,
     preferences: dict,
+    portfolio: dict,
     trader,
-    confidence: float,
-    risk_tolerance: str,
-    risk_copilot_mode: str,
+    spot_price: float = None,
+    confidence: float = 0.5,
+    risk_tolerance: str = "Moderate",
+    risk_copilot_mode: str = "Suggest actions, I confirm each one",
+    asset_type: str = None,
 ) -> dict:
     """
-    SELL: close the wallet's actual live RFQ position — never a
-    freshly-selected order-book contract, never a Firebase-reported
-    quantity.
+    SELL routing.
 
-    No collateral, no contract_selector, no validate_proposal here —
-    those are BUY-only concerns (sizing new capital against a fresh
-    contract). A SELL is either backed by a real live position or it
-    isn't.
+    EQUITY:
+        Uses the user's paper portfolio.
+        If the user does not own the equity -> RECOMMEND_ONLY.
+        If the user owns it -> PAPER_EQUITY EXECUTABLE proposal.
 
-    RESERVE PRICE: derived from the user's riskTolerance via
-    RESERVE_PRICE_FLOOR_USDC — a flat per-contract premium floor, not a
-    percentage, since there's no live mark/quote available for an RFQ
-    position ahead of the close (see the constant's docstring above for
-    why). Passed through in the selector so /confirm-trade's
-    close_rfq_position(...) call can use it directly.
+    THETANUTS / crypto:
+        Uses the live on-chain RFQ position.
+        If no live position -> RECOMMEND_ONLY.
+        If position exists -> THETANUTS SELL proposal.
+
+    SELL never creates a new option contract and never spends
+    new collateral.
     """
+
+    # ===============================================================
+    # 1. EQUITY SELL
+    # ===============================================================
+    #
+    # Known equity-like assets MUST stay inside the paper-equity
+    # pipeline. They must NEVER fall through to Thetanuts merely
+    # because the user doesn't own them.
+    #
+    if asset_type in (
+        "EQUITY_US",
+        "EQUITY_BURSA",
+        "EQUITY",
+        "INDEX_ETF",
+        "COMMODITY_ETF",
+    ):
+        paper_result = prepare_equity_proposal(
+            user_id=None,
+            symbol=symbol,
+            decision="SELL",
+            investment_analysis=investment_analysis,
+            preferences=preferences,
+            portfolio=portfolio or {},
+            spot_price=spot_price,
+        )
+
+        logger.info(
+            f"[TradeBridge] EQUITY SELL: {symbol} | "
+            f"status={paper_result.get('status')} | "
+            f"asset_type={asset_type}"
+        )
+
+        return paper_result
+
+    # ===============================================================
+    # 2. EXISTING REAL THETANUTS SELL FLOW
+    # ===============================================================
+    #
+    # Non-equity assets continue using the live RFQ position as the
+    # source of truth.
+    #
+
     lookup = _find_live_rfq_position(trader, symbol)
 
     if not lookup["ok"]:
@@ -335,18 +418,49 @@ def _build_sell_proposal(
         )
 
     underlying = _position_field(
-        position, "underlying", "asset", "underlyingAsset", "underlying_asset",
+        position,
+        "underlying",
+        "asset",
+        "underlyingAsset",
+        "underlying_asset",
     )
-    option_type = _position_field(
-        position, "optionType", "type", "option_type", "option_type_name",
-    )
-    strike = _position_field(position, "strike", "strikePrice", "strike_price")
-    expiry = _position_field(
-        position, "expiry", "expiration", "expirationTimestamp", "expiration_timestamp",
-    )
-    quantity = _position_field(position, "quantity", "contracts", "size")
 
-    if underlying is None or option_type is None or strike is None or expiry is None:
+    option_type = _position_field(
+        position,
+        "optionType",
+        "type",
+        "option_type",
+        "option_type_name",
+    )
+
+    strike = _position_field(
+        position,
+        "strike",
+        "strikePrice",
+        "strike_price",
+    )
+
+    expiry = _position_field(
+        position,
+        "expiry",
+        "expiration",
+        "expirationTimestamp",
+        "expiration_timestamp",
+    )
+
+    quantity = _position_field(
+        position,
+        "quantity",
+        "contracts",
+        "size",
+    )
+
+    if (
+        underlying is None
+        or option_type is None
+        or strike is None
+        or expiry is None
+    ):
         return _recommend_only(
             f"SELL blocked: the live {symbol} position is missing contract details.",
             risk_copilot_mode,
@@ -375,67 +489,67 @@ def _build_sell_proposal(
         )
 
     reserve_price = RESERVE_PRICE_FLOOR_USDC.get(
-        risk_tolerance, DEFAULT_RESERVE_PRICE_FLOOR_USDC
+        risk_tolerance,
+        DEFAULT_RESERVE_PRICE_FLOOR_USDC,
     )
 
-    # Selector carries exactly the fields /confirm-trade's SELL branch
-    # re-derives the position from (underlying/option_type/strike/expiry)
-    # plus the resolved position_address, so confirm-trade doesn't have to
-    # re-search — it can use this directly if it chooses to, and it will
-    # still match if it re-looks-up via find_position().
     selector = {
-        "underlying":       underlying,
-        "option_type":      option_type,
-        "strike":           strike,
-        "expiry":           expiry,
+        "underlying": underlying,
+        "option_type": option_type,
+        "strike": strike,
+        "expiry": expiry,
         "position_address": position_address,
-        "decision":         "SELL",
-        # SELL spends no new collateral — the collateral already belongs
-        # to the existing option position being closed.
-        "collateral_usdc":  0.0,
-        # Floor passed straight through to close_rfq_position(). If the
-        # RFQ market maker's quote comes in below this, the CLI should
-        # fail to fill rather than close at a bad price.
-        "reserve_price":    reserve_price,
+        "decision": "SELL",
+
+        # SELL does not spend new collateral.
+        "collateral_usdc": 0.0,
+
+        "reserve_price": reserve_price,
     }
 
     proposal = {
-        "selector":         selector,
-    
+        "selector": selector,
+
         # Frontend confirmation card
         "confirm_selector": {
-            "underlying":       underlying,
-            "option_type":      option_type,
-            "strike":            strike,
-            "expiry":            expiry,
-            "collateral_usdc":  0.0,
-            "previewed_price":  None,
+            "underlying": underlying,
+            "option_type": option_type,
+            "strike": strike,
+            "expiry": expiry,
+            "collateral_usdc": 0.0,
+            "previewed_price": None,
         },
-    
-        "symbol":            symbol,
-        "ticker":             f"{symbol}-USD",
-        "action":             "SELL",
-        "decision":           "SELL",
-    
-        # Keep both forms for compatibility
-        "confidence":         confidence,
-        "confidence_pct":     int(confidence * 100),
-    
-        "underlying":         underlying,
-        "option_type":        option_type,
-        "strike":              strike,
-        "expiry":              expiry,
-        "previewed_price":     None,
-        "quantity":            quantity,
-        "collateral_usdc":     0.0,
+
+        "symbol": symbol,
+        "ticker": f"{symbol}-USD",
+        "action": "SELL",
+        "decision": "SELL",
+
+        "confidence": confidence,
+        "confidence_pct": int(confidence * 100),
+
+        "underlying": underlying,
+        "option_type": option_type,
+        "strike": strike,
+        "expiry": expiry,
+        "previewed_price": None,
+
+        "quantity": quantity,
+
+        "collateral_usdc": 0.0,
         "proposed_amount_usdc": 0.0,
-        "reserve_price":       reserve_price,
-        "risk_level":          investment_analysis.get("risk_level", "MEDIUM"),
-        "risk_tolerance":      risk_tolerance,
-    
+
+        "reserve_price": reserve_price,
+
+        "risk_level": investment_analysis.get(
+            "risk_level",
+            "MEDIUM",
+        ),
+        "risk_tolerance": risk_tolerance,
+
         "wallet_snapshot": {
             "tradable_usdc": wallet.get("tradable_usdc"),
-            "has_gas":       wallet.get("has_gas"),
+            "has_gas": wallet.get("has_gas"),
         },
     }
 
@@ -447,9 +561,9 @@ def _build_sell_proposal(
     )
 
     return {
-        "status":      "EXECUTABLE",
-        "reason":      "Valid SELL proposal generated from your live RFQ position.",
-        "proposal":    proposal,
+        "status": "EXECUTABLE",
+        "reason": "Valid SELL proposal generated from your live RFQ position.",
+        "proposal": proposal,
         "action_mode": risk_copilot_mode,
     }
 
@@ -463,6 +577,7 @@ def build_trade_proposal(
     trader,         # ThetanutsTrader instance
     spot_price: float = None,
     explicit_user_action: str = None,
+    asset_type: str = None,
 ) -> dict:
     """
     Main entry point. Called from ai_agent.py after the committee decision.
@@ -517,6 +632,7 @@ def build_trade_proposal(
             symbol=symbol,
             investment_analysis=investment_analysis,
             preferences=preferences,
+            portfolio=portfolio,
             trader=trader,
             spot_price=spot_price,
             confidence=confidence,
@@ -528,8 +644,11 @@ def build_trade_proposal(
         symbol=symbol,
         investment_analysis=investment_analysis,
         preferences=preferences,
+        portfolio=portfolio,
         trader=trader,
+        spot_price=spot_price,
         confidence=confidence,
         risk_tolerance=risk_tolerance,
         risk_copilot_mode=risk_copilot_mode,
+        asset_type=asset_type,
     )
