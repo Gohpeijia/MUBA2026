@@ -137,6 +137,7 @@ class AIAgent:
         previous_consensus: dict = None,
         user_goal: dict = None,
         portfolio: dict = None,
+        user_id: str = None,
     ):
         # ── 1. INTELLIGENT ASSET RESOLUTION ──────────────────────────────────
         # Resolves queries with typos (e.g. "NASDAS 100"), aliases ("NDX", "US100", "Gold"),
@@ -259,6 +260,7 @@ class AIAgent:
                     spot_price=spot_price,
                     explicit_user_action=explicit_action,
                     asset_type=asset_type,
+                    user_id=user_id,
                 )
         
                 # Append trade status

@@ -10,6 +10,7 @@ import TradeConfirmationPopup from './TradeConfirmationPopup';
 
 export default function NotificationCenter() {
   const [notification, setNotification] = useState(null);
+  const [registrationError, setRegistrationError] = useState('');
   const dismissedConfirmationIds = useRef(new Set());
 
   const showConfirmation = useCallback((confirmation) => {
@@ -53,9 +54,15 @@ export default function NotificationCenter() {
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      dismissedConfirmationIds.current.clear();
+      setNotification(null);
+      setRegistrationError('');
       if (!user) return;
       requestAndRegisterFcmToken().catch((error) => {
         console.warn('FCM registration skipped:', error);
+        if (auth.currentUser?.uid === user.uid) {
+          setRegistrationError('Push notifications could not connect. Pending trade confirmations will still appear while this app is open.');
+        }
       });
       checkPendingConfirmations();
     });
@@ -78,11 +85,15 @@ export default function NotificationCenter() {
 
     subscribeToForegroundMessages((message) => {
       if (!mounted) return;
-      if (message?.data?.type === 'TRADE_CONFIRMATION') {
+      if (['TRADE_CONFIRMATION', 'TRADE_EXECUTION_RESULT', 'OPPORTUNITY_ALERT'].includes(message?.data?.type)) {
         setNotification(message);
+        window.dispatchEvent(new Event('trade-activity-updated'));
       }
     }).then((unsubscribe) => {
-      unsubscribeMessages = unsubscribe;
+      if (mounted) unsubscribeMessages = unsubscribe;
+      else unsubscribe();
+    }).catch((error) => {
+      console.warn('Foreground messaging unavailable:', error);
     });
 
     return () => {
@@ -92,6 +103,13 @@ export default function NotificationCenter() {
   }, []);
 
   return (
+    <>
+    {registrationError && (
+      <div role="status" style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 1000, maxWidth: 360, padding: 12, background: '#fff4dc', color: '#654600', borderRadius: 8 }}>
+        {registrationError}
+        <button onClick={() => setRegistrationError('')} aria-label="Dismiss push notification notice" style={{ marginLeft: 8 }}>×</button>
+      </div>
+    )}
     <TradeConfirmationPopup
       notification={notification}
       onDismiss={() => {
@@ -100,5 +118,6 @@ export default function NotificationCenter() {
         setNotification(null);
       }}
     />
+    </>
   );
 }

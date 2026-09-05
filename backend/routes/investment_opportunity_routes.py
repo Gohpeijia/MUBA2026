@@ -54,6 +54,7 @@ from services.trade_confirmation_service import (
 from ai_agent import trader
 from firebase_config import db
 from security import require_auth
+from services.opportunity_activity_service import list_opportunity_activity
 
 logger = logging.getLogger(__name__)
 
@@ -613,6 +614,16 @@ def prepare_trade(analysis_id):
 # ─────────────────────────────────────────────────────────────────────────────
 #  GET /api/opportunities/confirmations
 # ─────────────────────────────────────────────────────────────────────────────
+
+@opportunities_bp.route("/activity", methods=["GET"])
+@require_auth
+def get_opportunity_activity():
+    try:
+        return jsonify({"success": True, "activity": list_opportunity_activity(g.uid)}), 200
+    except Exception:
+        logger.exception("Failed to load opportunity activity")
+        return jsonify({"success": False, "error": "Could not load AI buy/sell activity."}), 500
+
 
 @opportunities_bp.route("/confirmations", methods=["GET"])
 @require_auth

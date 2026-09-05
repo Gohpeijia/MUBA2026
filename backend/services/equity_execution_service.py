@@ -1,5 +1,4 @@
 import logging
-import os
 from datetime import datetime
 from typing import Any
 
@@ -16,7 +15,6 @@ from services.portfolio_service import (
 from services.trade_proposal_serializer import serialize_trade_proposal
 
 logger = logging.getLogger(__name__)
-DEFAULT_PAPER_PORTFOLIO_VALUE = float(os.getenv("PAPER_PORTFOLIO_VALUE_USD", "10000"))
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -50,11 +48,15 @@ def _risk_tolerance(preferences: dict | None) -> str:
     return prefs.get("riskTolerance") or prefs.get("risk_tolerance") or "Moderate"
 
 
-def _portfolio_value_for_paper_trading(portfolio: dict) -> float:
-    portfolio_value = _to_float((portfolio or {}).get("total_value"))
-    if portfolio_value > 0:
-        return portfolio_value
-    return DEFAULT_PAPER_PORTFOLIO_VALUE
+def _portfolio_value_for_paper_trading(portfolio: dict, paper_cash: float) -> float:
+    # The portfolio summary contains holdings only. Include spendable cash
+    # instead of assuming a fresh/migrated account has $10,000 to invest.
+    holdings_value = sum(
+        _position_market_value(position, _to_float(position.get("average_cost")))
+        for position in (portfolio or {}).get("positions", {}).values()
+        if isinstance(position, dict)
+    )
+    return max(0.0, paper_cash) + max(0.0, holdings_value)
 
 
 def _analysis_price(analysis: dict | None, spot_price: Any = None) -> float:
@@ -124,7 +126,7 @@ def _find_legacy_holding(portfolio: list, symbol: str) -> dict | None:
 
 def _risk_gate(user_id: str, symbol: str, shares: int, price: float, preferences: dict | None = None) -> tuple[bool, str, dict]:
     portfolio = get_portfolio_state(user_id)
-    portfolio_value = _portfolio_value_for_paper_trading(portfolio)
+    portfolio_value = _portfolio_value_for_paper_trading(portfolio, get_paper_cash_balance(user_id))
     if portfolio_value <= 0:
         return False, "Portfolio value is zero or unknown.", {}
 
@@ -191,7 +193,8 @@ def prepare_equity_proposal(
         shares = quantity
         risk = {}
     else:
-        portfolio_value = _portfolio_value_for_paper_trading(portfolio)
+        paper_cash = get_paper_cash_balance(user_id)
+        portfolio_value = _portfolio_value_for_paper_trading(portfolio, paper_cash)
         if portfolio_value <= 0:
             return {"status": "RECOMMEND_ONLY", "reason": "Portfolio value is unavailable, so no paper equity order was prepared.", "proposal": None}
 
@@ -207,6 +210,21 @@ def prepare_equity_proposal(
         shares = int(sizing.get("recommended_shares") or 0)
         if shares <= 0 or not sizing.get("passes_risk_limits"):
             return {"status": "RECOMMEND_ONLY", "reason": "; ".join(sizing.get("notes", [])) or "Risk limits leave no room for this paper equity trade.", "proposal": None}
+        affordable_shares = max(0, int(paper_cash / price))
+        if affordable_shares < shares:
+            shares = affordable_shares
+            sizing = {
+                **sizing,
+                "recommended_shares": shares,
+                "position_value": round(shares * price, 2),
+                "position_pct_of_portfolio": round(shares * price / portfolio_value * 100, 2),
+                "dollar_risk": round(shares * abs(price - sizing["stop_loss_price"]), 2),
+                "capped_by": "paper_cash",
+                "passes_risk_limits": shares > 0,
+                "notes": [*sizing.get("notes", []), "Sized down to available paper cash."],
+            }
+        if shares <= 0:
+            return {"status": "RECOMMEND_ONLY", "reason": f"Insufficient paper cash for one share of {symbol}. Available ${paper_cash:.2f}.", "proposal": None}
         risk = sizing
 
     proposal = {
@@ -269,45 +287,11 @@ def execute_equity_buy(user_id: str, proposal: dict, *, action: str = "CONFIRM")
             "paper_cash_usd": paper_cash,
         }
 
-    portfolio = user_data.get("portfolio", [])
-    if not isinstance(portfolio, list):
-        portfolio = []
-
-    holding = _find_legacy_holding(portfolio, symbol)
-    if holding:
-        old_shares = _to_float(holding.get("shares", holding.get("quantity", 0.0)))
-        old_cost = _to_float(holding.get("averageCost", holding.get("average_cost", price)), price)
-        new_shares = old_shares + shares
-        average_cost = ((old_shares * old_cost) + (shares * price)) / new_shares if new_shares > 0 else price
-        holding.update({
-            "symbol": symbol,
-            "ticker": symbol,
-            "sticker": symbol,
-            "shares": new_shares,
-            "quantity": new_shares,
-            "averageCost": round(average_cost, 4),
-            "average_cost": round(average_cost, 4),
-            "name": proposal.get("name") or holding.get("name") or symbol,
-        })
-    else:
-        portfolio.append({
-            "symbol": symbol,
-            "ticker": symbol,
-            "sticker": symbol,
-            "name": proposal.get("name") or symbol,
-            "shares": shares,
-            "quantity": shares,
-            "averageCost": price,
-            "average_cost": price,
-            "assetType": "EQUITY",
-            "asset_type": "EQUITY",
-            "watchlist": False,
-        })
-
-    user_ref.update({"portfolio": portfolio})
-    paper_cash = adjust_paper_cash(user_id, -estimated_value)
-    _record_paper_trade(user_id, proposal, "buy", shares, price)
-    sync_portfolio_summary(user_id)
+    from services.paper_accounting import settle_paper_trade
+    try:
+        paper_cash = settle_paper_trade(user_id, symbol, "BUY", shares, price, proposal.get("name", ""), proposal.get("reason", ""))
+    except ValueError as exc:
+        return {"ok": False, "status": "FAILED", "error": str(exc)}
 
     return {
         "ok": True,
@@ -353,24 +337,12 @@ def execute_equity_sell(user_id: str, proposal: dict, *, action: str = "CONFIRM"
     if shares > held_shares:
         return {"ok": False, "status": "FAILED", "error": f"You only hold {held_shares:g} share(s) of {symbol}."}
 
-    remaining = held_shares - shares
-    if remaining <= 0:
-        portfolio = [item for item in portfolio if _find_legacy_holding([item], symbol) is None]
-    else:
-        holding.update({
-            "symbol": symbol,
-            "ticker": symbol,
-            "sticker": symbol,
-            "shares": remaining,
-            "quantity": remaining,
-        })
-
     estimated_value = round(shares * price, 2)
-
-    user_ref.update({"portfolio": portfolio})
-    paper_cash = adjust_paper_cash(user_id, estimated_value)
-    _record_paper_trade(user_id, proposal, "sell", shares, price)
-    sync_portfolio_summary(user_id)
+    from services.paper_accounting import settle_paper_trade
+    try:
+        paper_cash = settle_paper_trade(user_id, symbol, "SELL", shares, price, proposal.get("name", ""), proposal.get("reason", ""))
+    except ValueError as exc:
+        return {"ok": False, "status": "FAILED", "error": str(exc)}
 
     return {
         "ok": True,

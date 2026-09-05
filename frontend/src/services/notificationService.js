@@ -57,7 +57,7 @@ export async function requestAndRegisterFcmToken() {
   if (!fcmToken) return null;
 
   const headers = await authHeaders();
-  await fetch(`${API_BASE}/notifications/register-token`, {
+  const response = await fetch(`${API_BASE}/notifications/register-token`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -75,6 +75,10 @@ export async function getPendingTradeConfirmations() {
   const response = await fetch(`${API_BASE}/opportunities/confirmations`, {
     headers,
   });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.success === false) {
+    throw new Error(result.error || 'Could not register push notifications.');
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     throw new Error(data.error || 'Could not load pending confirmations.');

@@ -15,7 +15,6 @@ import { auth } from './firebase';
 
 import { AIAdvisorProvider, useAIAdvisor }  from './pages/AIAdvisorContext';
 import AIAdvisorPanel         from './pages/AIAdvisorPanel';
-import TextHighlightAsk       from './pages/TextHighlightAsk';
 import WalletBalance          from './pages/WalletBalance';
 import NotificationCenter     from './components/NotificationCenter';
 
@@ -131,7 +130,6 @@ function NavBar() {
 
 function AppShell() {
   const location = useLocation();
-  const { setHighlightedContext } = useAIAdvisor();
   const { user, authLoading } = useAuthState();
   
   const isStocks = location.pathname === '/stocks';
@@ -201,12 +199,7 @@ function AppShell() {
       <NotificationCenter />
 
       {/* AI side panel */}
-      {showPanel && (
-        <>
-          <AIAdvisorPanel />
-          <TextHighlightAsk onAskAI={setHighlightedContext} />
-        </>
-      )}
+      {showPanel && <AIAdvisorPanel />}
     </>
   );
 }

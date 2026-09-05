@@ -24,6 +24,15 @@ wallet_bp = Blueprint('wallet', __name__)
 trader = ThetanutsTrader()
 
 
+@wallet_bp.route('/paper-balance', methods=['GET'])
+@require_auth
+def get_paper_wallet_balance():
+    cash = get_paper_cash_balance(g.uid)
+    return jsonify({"success": True, "data": {
+        "ok": True, "paper_cash_usd": cash, "paper_tradable_usd": cash,
+    }})
+
+
 @wallet_bp.route('/balance', methods=['GET'])
 @require_auth
 def get_wallet_balance():

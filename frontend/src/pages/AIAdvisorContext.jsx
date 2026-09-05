@@ -239,7 +239,7 @@ export function AIAdvisorProvider({ children }) {
     );
 
     const response = await fetch(
-      'http://localhost:5000/api/aiagent/ai/confirm-trade',
+      `${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api'}/aiagent/ai/confirm-trade`,
       {
         method: 'POST',
         headers: {

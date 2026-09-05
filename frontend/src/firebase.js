@@ -20,3 +20,5 @@ export const analytics = getAnalytics(app);
 // 🟢 EXPORT auth and db so your components can access them!
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+

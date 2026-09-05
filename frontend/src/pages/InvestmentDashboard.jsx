@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import axios from 'axios';
 import { auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import OpportunityActivity from '../components/OpportunityActivity';
 import './InvestmentDashboard.css';
 
-const API_BASE = 'http://127.0.0.1:5000/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
 
 /* ── Helpers ── */
 const fmtUSD = (n, opts = {}) =>
@@ -482,6 +483,9 @@ function TradeProposalModal({ proposal, onClose, onSuccess }) {
 /* ── Main Dashboard ── */
 export default function InvestmentDashboard({ userName }) {
   const [trades, setTrades] = useState([]);
+  const [paperCash, setPaperCash] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [activityError, setActivityError] = useState('');
   const [currentPrices, setCurrentPrices] = useState({});
   const [usdMyrRate, setUsdMyrRate] = useState(DEFAULT_USD_MYR_RATE);
   const [loading, setLoading] = useState(true);
@@ -506,6 +510,7 @@ export default function InvestmentDashboard({ userName }) {
       const tradesRes = await axios.get(`${API_BASE}/stocks/portfolio/trades`, { headers });
       const tradeList = tradesRes.data.success ? tradesRes.data.data.trades || [] : [];
       setTrades(tradeList);
+      setPaperCash(tradesRes.data.data?.paper_cash_usd ?? null);
 
       try {
         const fxRes = await axios.get(`${API_BASE}/stocks/market/fx/usd-myr`, { headers });
@@ -553,6 +558,62 @@ export default function InvestmentDashboard({ userName }) {
   }, [fetchData]);
 
   useEffect(() => {
+    let active = true;
+    let fetching = false;
+    const refresh = async () => {
+      const user = auth.currentUser;
+      if (!user || fetching || document.hidden) return;
+      fetching = true;
+      try {
+        const token = await user.getIdToken();
+        const headers = { Authorization: `Bearer ${token}` };
+        const results = await Promise.allSettled([
+          axios.get(`${API_BASE}/opportunities/activity`, { headers }),
+          axios.get(`${API_BASE}/stocks/portfolio/trades`, { headers }),
+        ]);
+        if (!active || auth.currentUser?.uid !== user.uid) return;
+        const [activityResult, tradesResult] = results;
+        if (activityResult.status === 'fulfilled' && activityResult.value.data.success) {
+          setActivity(activityResult.value.data.activity || []);
+          setActivityError('');
+        } else {
+          setActivityError('Could not load AI activity. Check that the updated backend is running.');
+        }
+        if (tradesResult.status === 'fulfilled' && tradesResult.value.data.success) {
+          const latestTrades = tradesResult.value.data.data.trades || [];
+          setTrades(latestTrades);
+          setPaperCash(tradesResult.value.data.data.paper_cash_usd ?? null);
+          const symbols = [...new Set(latestTrades.filter(t => !isOptionTrade(t)).map(t => t.ticker))];
+          if (symbols.length) {
+            try {
+              const quotes = await axios.get(`${API_BASE}/stocks/market/quote`, { headers, params: { symbols: symbols.join(',') } });
+              if (active && auth.currentUser?.uid === user.uid && quotes.data.success) setCurrentPrices(quotes.data.data || {});
+            } catch { /* Keep the last available valuation when quotes are unavailable. */ }
+          }
+        }
+      } finally {
+        fetching = false;
+      }
+    };
+    const refreshSafely = () => refresh().catch(() => {
+      if (active) setActivityError('Could not refresh AI activity. Please try again.');
+    });
+    const unsubscribe = onAuthStateChanged(auth, refreshSafely);
+    const timer = window.setInterval(refreshSafely, 15000);
+    window.addEventListener('trade-activity-updated', refreshSafely);
+    window.addEventListener('wallet:refresh', refreshSafely);
+    window.addEventListener('focus', refreshSafely);
+    return () => {
+      active = false;
+      unsubscribe();
+      window.clearInterval(timer);
+      window.removeEventListener('trade-activity-updated', refreshSafely);
+      window.removeEventListener('wallet:refresh', refreshSafely);
+      window.removeEventListener('focus', refreshSafely);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showDatePicker) return;
     const onClickOutside = (e) => {
       if (dateFilterRef.current && !dateFilterRef.current.contains(e.target)) {
@@ -580,16 +641,17 @@ export default function InvestmentDashboard({ userName }) {
     const marketValue = openHoldings.reduce((s, h) => s + h.marketValue, 0);
     const unrealizedPnl = openHoldings.reduce((s, h) => s + h.unrealizedPnl, 0);
     const equityRealizedPnl = holdings.reduce((s, h) => s + h.realizedPnl, 0);
-    const realizedPnl = equityRealizedPnl + optionRealizedPnl;
+    const realizedPnl = equityRealizedPnl;
     return { marketValue, unrealizedPnl, realizedPnl, totalPnl: unrealizedPnl + realizedPnl };
-  }, [holdings, openHoldings, optionRealizedPnl]);
+  }, [holdings, openHoldings]);
 
   const totalsMyr = useMemo(() => ({
     marketValue: totals.marketValue * usdMyrRate,
+    accountValue: paperCash == null ? null : (Number(paperCash) + totals.marketValue) * usdMyrRate,
     realizedPnl: totals.realizedPnl * usdMyrRate,
     unrealizedPnl: totals.unrealizedPnl * usdMyrRate,
     totalPnl: totals.totalPnl * usdMyrRate,
-  }), [totals, usdMyrRate]);
+  }), [totals, usdMyrRate, paperCash]);
 
   const sortedTrades = useMemo(
     () =>
@@ -723,18 +785,22 @@ export default function InvestmentDashboard({ userName }) {
 
         {/* Portfolio value + total P&L */}
         <section className="inv-card inv-card--hero">
-          <span className="card-label">Portfolio Value</span>
-          <div className="inv-hero-value">{fmtRM(totalsMyr.marketValue)}</div>
+          <span className="card-label">Paper Portfolio Value</span>
+          <div className="inv-hero-value">{totalsMyr.accountValue == null ? 'Unavailable' : fmtRM(totalsMyr.accountValue)}</div>
+          <p className="inv-card-sub">Cash: {paperCash == null ? 'Unavailable' : fmtUSD(Number(paperCash))} + Stocks: {fmtUSD(totals.marketValue)}</p>
           <div className={`inv-hero-delta ${isTotalUp ? 'inv-up' : 'inv-down'}`}>
             <span>{isTotalUp ? '▲' : '▼'}</span>
             <span>{isTotalUp ? '+' : '-'}{fmtRM(totalsMyr.totalPnl)} total P&L</span>
           </div>
           <div className="inv-pnl-split">
-            <span>Realized: <strong className={totals.realizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.realizedPnl >= 0 ? '+' : '-'}{fmtUSDC(totals.realizedPnl)} ({fmtRM(totalsMyr.realizedPnl)})</strong></span>
-            <span>Unrealized: <strong className={totals.unrealizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.unrealizedPnl >= 0 ? '+' : '-'}{fmtUSDC(totals.unrealizedPnl)} ({fmtRM(totalsMyr.unrealizedPnl)})</strong></span>
+            <span>Realized: <strong className={totals.realizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.realizedPnl >= 0 ? '+' : '-'}{fmtUSD(totals.realizedPnl)} ({fmtRM(totalsMyr.realizedPnl)})</strong></span>
+            <span>Unrealized: <strong className={totals.unrealizedPnl >= 0 ? 'inv-up-text' : 'inv-down-text'}>{totals.unrealizedPnl >= 0 ? '+' : '-'}{fmtUSD(totals.unrealizedPnl)} ({fmtRM(totalsMyr.unrealizedPnl)})</strong></span>
           </div>
-          <span className="inv-card-sub">Demo FX: 1 USDC = {usdMyrRate.toFixed(4)} MYR</span>
+          <span className="inv-card-sub">Display FX: 1 USD = {usdMyrRate.toFixed(4)} MYR. Stock values use the latest available quote, or the last trade price.</span>
+          {optionRealizedPnl !== 0 && <p className="inv-card-sub">Options realized P&amp;L (separate wallet): {optionRealizedPnl < 0 ? '-' : '+'}{fmtUSDC(optionRealizedPnl)}</p>}
         </section>
+
+        <OpportunityActivity items={activity} error={activityError} />
 
         {/* Current holdings */}
         <section className="inv-card inv-card--wide">

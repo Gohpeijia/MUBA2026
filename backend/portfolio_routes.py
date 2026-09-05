@@ -310,26 +310,7 @@ def buy_stock():
         risk_tolerance = preferences.get('riskTolerance', 'Moderate')
         portfolio_state = sync_portfolio_summary(secure_user_id, user_data)
 
-        raw_total_value = data.get(
-            'totalPortfolioValue',
-            user_data.get('totalPortfolioValue', portfolio_state.get('total_value', 0.0)),
-        )
-        try:
-            total_portfolio_value = float(raw_total_value or 0.0)
-        except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "totalPortfolioValue must be a valid number"}), 400
-
-        if total_portfolio_value <= 0:
-            total_portfolio_value = float(portfolio_state.get('total_value', 0.0) or 0.0)
-
-        if total_portfolio_value <= 0:
-            total_portfolio_value = get_paper_cash_balance(secure_user_id)
-
-        if total_portfolio_value <= 0:
-            return jsonify({
-                "success": False,
-                "error": "Portfolio value is required for risk management.",
-            }), 400
+        total_portfolio_value = float(portfolio_state.get('total_value', 0.0) or 0.0) + get_paper_cash_balance(secure_user_id)
 
         existing_shares = 0.0
         for item in portfolio:
@@ -388,65 +369,8 @@ def buy_stock():
                 "risk_sizing": proposal_for_gate,
             }), 403
 
-        stock_found = False
-
-        for item in portfolio:
-            if not isinstance(item, dict):
-                continue
-            item_symbol = normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker'))
-            if item_symbol == sticker:
-                old_shares = float(item.get('shares', item.get('quantity', 0.0)) or 0.0)
-                old_cost = float(item.get('averageCost', item.get('average_cost', price)) or price)
-                new_shares = old_shares + shares
-                average_cost = ((old_shares * old_cost) + (shares * price)) / new_shares if new_shares > 0 else price
-                item['symbol'] = sticker
-                item['ticker'] = sticker
-                item['sticker'] = sticker
-                item['shares'] = new_shares
-                item['quantity'] = new_shares
-                item['averageCost'] = round(average_cost, 4)
-                item['average_cost'] = round(average_cost, 4)
-                item['name'] = name
-                item['fields'] = fields
-                item['chart'] = chart
-                item['watchlist'] = watchlist
-                stock_found = True
-                break
-
-        if not stock_found:
-            portfolio.append({
-                "symbol": sticker,
-                "ticker": sticker,
-                "sticker": sticker,
-                "name": name,
-                "shares": shares,
-                "quantity": shares,
-                "averageCost": price,
-                "average_cost": price,
-                "assetType": "EQUITY",
-                "asset_type": "EQUITY",
-                "fields": fields,
-                "chart": chart,
-                "watchlist": watchlist,
-            })
-
-        update_payload = {"portfolio": portfolio}
-        if 'totalPortfolioValue' in data:
-            update_payload["totalPortfolioValue"] = total_portfolio_value
-
-        user_ref.update(update_payload)
-        paper_cash = adjust_paper_cash(secure_user_id, -trade_value)
-        sync_portfolio_summary(secure_user_id)
-
-        _record_trade(
-            user_id=secure_user_id,
-            ticker=sticker,
-            action='buy',
-            quantity=shares,
-            price=price,
-            company_name=name,
-            reason=reason,
-        )
+        from services.paper_accounting import settle_paper_trade
+        paper_cash = settle_paper_trade(secure_user_id, sticker, "BUY", shares, price, name, reason)
 
         return jsonify({
             "success": True,
@@ -518,36 +442,8 @@ def sell_stock():
             }), 400
 
         company_name = holding.get('name', sticker)
-        remaining_shares = held_shares - shares
-        holding['symbol'] = sticker
-        holding['ticker'] = sticker
-        holding['sticker'] = sticker
-        holding['shares'] = remaining_shares
-        holding['quantity'] = remaining_shares
-
-        if remaining_shares <= 0:
-            portfolio = [
-                item for item in portfolio
-                if not (
-                    isinstance(item, dict)
-                    and normalize_symbol(item.get('symbol') or item.get('ticker') or item.get('sticker')) == sticker
-                )
-            ]
-
-        trade_value = round(shares * price, 2)
-        user_ref.update({"portfolio": portfolio})
-        paper_cash = adjust_paper_cash(secure_user_id, trade_value)
-        sync_portfolio_summary(secure_user_id)
-
-        _record_trade(
-            user_id=secure_user_id,
-            ticker=sticker,
-            action='sell',
-            quantity=shares,
-            price=price,
-            company_name=company_name,
-            reason=reason,
-        )
+        from services.paper_accounting import settle_paper_trade
+        paper_cash = settle_paper_trade(secure_user_id, sticker, "SELL", shares, price, company_name, reason)
 
         return jsonify({
             "success": True,
@@ -607,7 +503,7 @@ def get_trades():
 
         return jsonify({
             "success": True,
-            "data": {"trades": trades}
+            "data": {"trades": trades, "paper_cash_usd": get_paper_cash_balance(secure_user_id)}
         })
 
     except Exception as e:

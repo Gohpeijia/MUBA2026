@@ -578,6 +578,7 @@ def build_trade_proposal(
     spot_price: float = None,
     explicit_user_action: str = None,
     asset_type: str = None,
+    user_id: str = None,
 ) -> dict:
     """
     Main entry point. Called from ai_agent.py after the committee decision.
@@ -626,7 +627,19 @@ def build_trade_proposal(
             risk_copilot_mode,
         )
 
-    # ── 3. Dispatch — BUY and SELL are genuinely different pipelines ────
+    # Stock BUY and SELL share the cash-backed paper execution path.
+    from services.execution_router import PAPER_EQUITY, resolve_execution_target
+    route = resolve_execution_target(symbol, asset_type)
+    if route.get("execution_target") == PAPER_EQUITY:
+        if decision == "BUY" and not user_id:
+            return _recommend_only("Sign in to size a stock purchase against your paper wallet.", risk_copilot_mode)
+        return prepare_equity_proposal(
+            user_id=user_id, symbol=route.get("symbol") or symbol,
+            decision=decision, investment_analysis=investment_analysis,
+            preferences=preferences, portfolio=portfolio, spot_price=spot_price,
+        )
+
+    # ── 3. Dispatch options BUY and SELL ────
     if decision == "BUY":
         return _build_buy_proposal(
             symbol=symbol,

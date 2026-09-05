@@ -148,13 +148,7 @@ def _summary_from_user_data(user_data: dict) -> dict:
     calculated_total = sum(
         _to_float(position.get("market_value")) for position in positions.values()
     )
-    total_value = _to_float(
-        user_data.get("total_value", user_data.get("totalPortfolioValue")),
-        calculated_total,
-    )
-
-    if total_value <= 0 and calculated_total > 0:
-        total_value = calculated_total
+    total_value = calculated_total
 
     return {
         "total_value": total_value,
@@ -242,6 +236,7 @@ def _paper_cash_from_trades(user_id: str) -> float:
                 cash += value
     except Exception:
         logger.exception("Failed to derive paper cash from trades for user %s", user_id)
+        raise
 
     return round(cash, 2)
 
@@ -266,11 +261,16 @@ def get_paper_cash_balance(user_id: str) -> float:
         return round(_to_float(data.get("paperCashUsd"), DEFAULT_PAPER_CASH_USD), 2)
 
     cash = _paper_cash_from_trades(user_id)
-    user_ref.set({
-        "paperCashUsd": cash,
-        "paperCashVersion": PAPER_CASH_VERSION,
-    }, merge=True)
-    return cash
+    @firestore.transactional
+    def initialize(transaction):
+        current = user_ref.get(transaction=transaction).to_dict() or {}
+        if current.get("paperCashVersion") == PAPER_CASH_VERSION and current.get("paperCashUsd") is not None:
+            return float(current["paperCashUsd"])
+        transaction.set(user_ref, {
+            "paperCashUsd": cash, "paperCashVersion": PAPER_CASH_VERSION,
+        }, merge=True)
+        return cash
+    return initialize(db.transaction())
 
 
 def adjust_paper_cash(user_id: str, delta: float) -> float:

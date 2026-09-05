@@ -405,6 +405,7 @@ def chat_with_agent():
             preferences  = preferences,
             user_goal    = tabung_goal,
             portfolio    = portfolio_data,
+            user_id      = user_id,
         )
         # LOCAL TEST: explicit user BUY command forces BUY execution.
         # The AI analysis can still say HOLD/SELL, but an explicit "buy ..."
@@ -533,7 +534,7 @@ def confirm_trade():
             }), 400
 
          # ===============================================================
-        # PAPER EQUITY SELL
+        # PAPER EQUITY BUY / SELL
         # ===============================================================
         
         execution_target = (
@@ -550,14 +551,14 @@ def confirm_trade():
                 execution_target
                 or proposal_data.get("execution_target")
             )
-        if decision == "SELL" and execution_target == "PAPER_EQUITY":
+        if execution_target == "PAPER_EQUITY":
         
             # Frontend sends Paper Equity fields at the top level,
             # unlike Thetanuts which uses selector.
             proposal = dict(proposal_data or {})
             proposal["execution_target"] = "PAPER_EQUITY"
-            proposal["decision"] = "SELL"
-            proposal["action"] = "SELL"
+            proposal["decision"] = decision
+            proposal["action"] = decision
             # -----------------------------------------------------------
             # Read symbol from the top-level request first.
             # Frontend sends:
@@ -595,7 +596,7 @@ def confirm_trade():
             if not proposal.get("symbol"):
                 return jsonify({
                     "success": False,
-                    "error": "Paper equity SELL requires symbol.",
+                    "error": "Paper equity trade requires symbol.",
                 }), 400
             execution_result = execute_prepared_proposal(
                 user_id=user_id,
@@ -607,29 +608,29 @@ def confirm_trade():
                     "success": False,
                     "error": execution_result.get(
                         "error",
-                        "Paper SELL execution failed."
+                        "Paper equity execution failed."
                     ),
                     "data": {
-                        "decision": "SELL",
+                        "decision": decision,
                         "execution": execution_result,
                     },
                 }), 409
             return jsonify({
                 "success": True,
                 "data": {
-                    "decision": "SELL",
+                    "decision": decision,
                     "status": execution_result.get(
                         "status",
                         "PAPER_EXECUTED"
                     ),
                     "execution": execution_result,
-                    "dry_run": False,
+                    "dry_run": True,
                 },
             })
 
         # ---------------------------------------------------------------
         # Thetanuts trades require a complete option selector.
-        # Paper equity SELL has already returned above.
+        # Paper equity BUY/SELL has already returned above.
         # ---------------------------------------------------------------
         if (
             not ticker

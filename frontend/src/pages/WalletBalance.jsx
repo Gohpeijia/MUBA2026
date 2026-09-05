@@ -3,7 +3,7 @@ import { FaWallet, FaSyncAlt, FaExclamationTriangle } from 'react-icons/fa';
 import { auth } from '../firebase';
 import './WalletBalance.css';
 
-const API_BASE = 'http://localhost:5000/api/wallet';
+const API_BASE = `${import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api'}/wallet`;
 const REFRESH_INTERVAL_MS = 30000;
 
 /**
@@ -29,7 +29,7 @@ export default function WalletBalance({ variant = 'pill' }) {
       if (!user) throw new Error('Not signed in');
       const token = await user.getIdToken();
 
-      const res = await fetch(`${API_BASE}/balance`, {
+      const res = await fetch(`${API_BASE}/paper-balance`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -53,10 +53,12 @@ export default function WalletBalance({ variant = 'pill' }) {
       fetchBalance();
     };
     window.addEventListener('wallet:refresh', handleGlobalRefresh);
+    window.addEventListener('trade-activity-updated', handleGlobalRefresh);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('wallet:refresh', handleGlobalRefresh);
+      window.removeEventListener('trade-activity-updated', handleGlobalRefresh);
     };
   }, [fetchBalance]);
   // Two different kinds of "not good": the request itself failed
@@ -108,7 +110,7 @@ export default function WalletBalance({ variant = 'pill' }) {
             <div className="wallet-balance__row">
               <span className="wallet-balance__amount">
                 {Number(balance.paper_tradable_usd || 0).toFixed(2)}
-                <span className="wallet-balance__unit"> USDC</span>
+                <span className="wallet-balance__unit"> USD paper</span>
               </span>
               {variant === 'card' && (
                 <span className="wallet-balance__label">paper cash</span>
@@ -117,7 +119,7 @@ export default function WalletBalance({ variant = 'pill' }) {
 
             {variant === 'card' && (
               <div className="wallet-balance__meta">
-                <span>{Number(balance.usdc || 0).toFixed(2)} USDC on-chain</span>
+                <span>Available for stock purchases</span>
                 {balance.chain_wallet && (
                   <>
                     <span className="wallet-balance__dot">·</span>
