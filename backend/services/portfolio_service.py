@@ -251,6 +251,13 @@ def get_paper_cash_balance(user_id: str) -> float:
     snap = user_ref.get()
     data = snap.to_dict() if snap.exists else {}
 
+    logger.info(
+        "PAPER CASH DEBUG user=%s paperCashUsd=%s version=%s",
+        user_id,
+        data.get("paperCashUsd"),
+        data.get("paperCashVersion"),
+    )
+
     if (
         isinstance(data, dict)
         and data.get("paperCashUsd") is not None
@@ -268,17 +275,41 @@ def get_paper_cash_balance(user_id: str) -> float:
 
 def adjust_paper_cash(user_id: str, delta: float) -> float:
     user_ref = db.collection("users").document(user_id)
-    get_paper_cash_balance(user_id)
+
+    current_cash = get_paper_cash_balance(user_id)
+    new_cash = round(current_cash + delta, 2)
+
+    if new_cash < 0:
+        raise ValueError(
+            f"Paper cash cannot become negative. "
+            f"Current={current_cash:.2f}, delta={delta:.2f}"
+        )
 
     user_ref.update({
-        "paperCashUsd": firestore.Increment(round(delta, 2)),
+        "paperCashUsd": new_cash,
         "paperCashVersion": PAPER_CASH_VERSION,
     })
 
-    snap = user_ref.get()
-    data = snap.to_dict() if snap.exists else {}
-    return round(_to_float(data.get("paperCashUsd"), DEFAULT_PAPER_CASH_USD), 2)
+    return new_cash
 
+def reset_paper_cash(user_id: str) -> float:
+    """Reset the user's paper equity cash to the default starting balance."""
+    user_ref = db.collection("users").document(user_id)
+
+    reset_amount = round(DEFAULT_PAPER_CASH_USD, 2)
+
+    user_ref.set({
+        "paperCashUsd": reset_amount,
+        "paperCashVersion": PAPER_CASH_VERSION,
+    }, merge=True)
+
+    logger.info(
+        "PAPER CASH RESET user=%s cash=%.2f",
+        user_id,
+        reset_amount,
+    )
+
+    return reset_amount
 
 def user_holds_symbol(portfolio: dict, symbol: str) -> bool:
     target = normalize_symbol(symbol)
@@ -295,3 +326,4 @@ def user_holds_symbol(portfolio: dict, symbol: str) -> bool:
         return _position_quantity(position) > 0
 
     return False
+

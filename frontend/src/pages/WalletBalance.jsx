@@ -65,7 +65,8 @@ export default function WalletBalance({ variant = 'pill' }) {
   // warning state, but the message differs.
   const walletUnreachable = !fetchError && balance && balance.ok === false;
   const hasLiveBalance = !fetchError && balance && balance.ok === true;
-  const noTradableFunds = hasLiveBalance && balance.tradable_usdc === 0;
+  const noTradableFunds =
+  hasLiveBalance && Number(balance.paper_tradable_usd || 0) === 0;
 
   return (
     <div
@@ -106,7 +107,7 @@ export default function WalletBalance({ variant = 'pill' }) {
           <>
             <div className="wallet-balance__row">
               <span className="wallet-balance__amount">
-                {balance.tradable_usdc.toFixed(2)}
+                {Number(balance.paper_tradable_usd || 0).toFixed(2)}
                 <span className="wallet-balance__unit"> USDC</span>
               </span>
               {variant === 'card' && (
@@ -116,7 +117,7 @@ export default function WalletBalance({ variant = 'pill' }) {
 
             {variant === 'card' && (
               <div className="wallet-balance__meta">
-                <span>{balance.usdc.toFixed(2)} USDC fake fund</span>
+                <span>{Number(balance.usdc || 0).toFixed(2)} USDC on-chain</span>
                 {balance.chain_wallet && (
                   <>
                     <span className="wallet-balance__dot">·</span>

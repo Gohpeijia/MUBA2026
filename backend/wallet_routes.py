@@ -11,7 +11,10 @@
 
 from flask import Blueprint, jsonify, request, g
 from security import require_auth
-from services.portfolio_service import get_paper_cash_balance
+from services.portfolio_service import (
+    get_paper_cash_balance,
+    reset_paper_cash,
+)
 from thetanuts_trader import ThetanutsTrader
 
 wallet_bp = Blueprint('wallet', __name__)
@@ -56,3 +59,16 @@ def get_wallet_transactions():
 
     history = trader.get_transaction_history(limit=limit)
     return jsonify({"success": True, "data": history})
+
+@wallet_bp.route('/reset-paper-cash', methods=['POST'])
+@require_auth
+def reset_wallet_paper_cash():
+    reset_paper_cash(g.uid)
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "paper_cash_usd": 10000.00,
+            "message": "Paper cash reset to $10,000."
+        }
+    })
