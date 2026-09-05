@@ -1,692 +1,449 @@
-<div align="center">
+# AmanahAI
 
-                         app.py
-                           │
-             ┌─────────────┴─────────────┐
-             │                           │
-       API Blueprints              APScheduler
-             │                           │
-             │                     every 30 min
-             │                           │
-             ▼                           ▼
-    /api/opportunities          execute_scan_pipeline()
-             │                           │
-             │                    ┌──────┴──────┐
-             │                    │             │
-             │               Screener       Ranker
-             │                    │             │
-             │                    └──────┬──────┘
-             │                           ▼
-             │                  TOP 5 candidates
-             │                           │
-             │                           ▼
-             │                 MultiAgentOrchestrator
-             │                           │
-             │                           ▼
-             │                  BUY / SELL / HOLD
-             │                           │
-             │                  confidence >= 0.55
-             │                           │
-             │                           ▼
-             │                    Opportunity Cache
-             │
-             ▼
-       React Frontend
-             │
-             │ user clicks "Act"
-             ▼
- /<analysis_id>/prepare
-             │
-             ▼
-    Firebase preferences
-    Firebase portfolio
-             │
-             ▼
-   build_trade_proposal()
-             │
-             ▼
-       PROPOSAL ONLY
-             │
-             ▼
-     User confirmation
-             │
-             ▼
- /api/aiagent/ai/confirm-trade
-             │
-             ▼
-     Fresh OptionBook
-             │
-             ▼
-        Validator
-             │
-             ▼
-    ThetanutsTrader
-             │
-             ▼
-         DRY RUN
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)
+![Base](https://img.shields.io/badge/Base-0052FF?style=for-the-badge&logo=base&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=white)
 
+AmanahAI is an AI-assisted investment and portfolio management application that brings market research, personalised risk preferences, and blockchain options workflows into one dashboard.
 
+**Explore markets. Understand the reasoning. Review the action.**
 
-![alt text](image.png)
+## Navigation
 
+| Explore the project | Set up and run |
+| --- | --- |
+| [Description](#description) | [Prerequisites](#prerequisites) |
+| [Demo](#demo) | [Install Dependencies](#1-install-javascript-dependencies) |
+| [Key Features](#key-features) | [Configure Firebase](#3-configure-firebase) |
+| [Architecture](#architecture) | [Fund the Demo Wallet](#c-add-10000-local-usdc) |
+| [Problem Statement](#problem-statement) | [Setup and Installation](#setup-and-installation) |
+| [Blockchain Technology](#blockchain-technology-used) | [Anvil and Virtual Funds](#set-up-anvil-and-virtual-funds-windows-git-bash) |
+| [Contract Addresses](#smart-contract-addresses-local-fork--testnet) | [Start the Application](#6-start-the-application) |
+| [Project Structure](#project-structure) | [Development Checks](#7-development-checks) |
+| [Team Members](#team-members) | [Configuration: Backend](#4-configure-the-backend) · [Frontend](#5-configure-the-frontend) |
 
-                    /confirm-trade
-                          │
-                ┌─────────┴─────────┐
-                │                   │
-              BUY                 SELL
-                │                   │
-          live OptionBook      live positions
-                │                   │
-          validate funds       find exact position
-                │                   │
-          book fill             source?
-                                    │
-                              ┌─────┴─────┐
-                              │           │
-                             RFQ         Book
-                              │           │
-                         RFQ close      BLOCK
-                              │
-                       verify closed
-                              │
-                       wallet_after
-                              │
-                     update Firestore
+<details>
+<summary><strong>Step-by-step setup links</strong></summary>
 
-AI analyzes market
-      ↓
-AI decides: SELL / CLOSE
-      ↓
-Your system sends RFQ
-      ↓
-Thetanuts / market maker gives you an actual quote
-      ↓
-Example: "I will buy your position for $480"
-      ↓
-Your system decides whether $480 is acceptable
-      ↓
-Accept RFQ → position closes
+1. [Install JavaScript dependencies](#1-install-javascript-dependencies)
+2. [Create a Python environment](#2-create-a-python-environment)
+3. [Configure Firebase](#3-configure-firebase)
+4. [Configure the backend](#4-configure-the-backend)
+5. [Set up Anvil and virtual funds](#set-up-anvil-and-virtual-funds-windows-git-bash)
+   - [Install Foundry](#a-install-foundry)
+   - [Start a Base mainnet fork](#b-start-a-base-mainnet-fork)
+   - [Add 10,000 local USDC](#c-add-10000-local-usdc)
+   - [Connect the funded account](#d-connect-amanahai-to-the-funded-account)
+6. [Configure the frontend](#5-configure-the-frontend)
+7. [Start the application](#6-start-the-application)
+8. [Run development checks](#7-development-checks)
 
-
-[![React](https://img.shields.io/badge/React-19+-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask)](https://flask.palletsprojects.com)
-[![Firebase](https://img.shields.io/badge/Firebase-Firestore%20%2B%20Auth-FFCA28?style=flat&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
- 
-
-</div>
+</details>
 
 ---
 
-## 📖 Table of Contents
+## Description
 
-- [What is Amanah?](#-what-is-amanah)
-- [Features](#-features)
-- [Technology Stack](#-technology-stack)
-- [AI System](#-ai-system)
-- [Architecture](#-architecture)
-- [Database Schema](#-database-schema)
-- [API Reference](#-api-reference)
-- [Setup & Installation](#-setup--installation)
-- [Environment Variables](#-environment-variables)
-- [Security Notes](#-security-notes)
+The application combines a React frontend with a Python Flask backend. Specialist AI agents analyse technical indicators, company fundamentals, news, and risk, then combine their findings into investment recommendations. Users can explore stocks, manage a paper portfolio, review opportunities, and choose how recommendations are handled.
 
----
+## Demo
 
-## 🌙 What is Amanah?
+Follow this walkthrough after [starting the application](#6-start-the-application):
 
-Amanah ("trust" in Arabic) is an AI-powered financial advisor that screens stocks for Shariah compliance, runs an 8-agent swarm simulation to generate investment consensus, and answers financial questions in Bahasa Melayu. It is built specifically for Muslim retail investors in Malaysia who need halal-first guidance without compromising on analytical depth.
+| Screen | What to explore |
+| --- | --- |
+| **Investment dashboard** | Review opportunities and your portfolio alongside saved risk preferences. |
+| **AI advisor** | Ask about an asset and inspect the analysis behind a recommendation. |
+| **Wallet and transaction preview** | Check local ETH/USDC balances and preview a supported BTC or ETH option proposal with `FORCE_DRY_RUN=true`. |
 
----
+*Dashboard, AI analysis, and wallet preview screenshots are pending capture.*
 
-## ✨ Features
+<!-- Add real application captures here when available. Keep private keys, API credentials, and personal account information out of screenshots. -->
 
-| Feature | Description |
-|---|---|
-| 🤖 **AI Swarm Consensus** | 8 specialised AI agents debate each stock in parallel and vote on BUY / HOLD / SELL / VETO |
-| 🕌 **Shariah Screener** | Automatic debt ratio, sector, and interest-income checks per AAOIFI standards |
-| 📊 **Live Market Data** | Real-time price, fundamentals, and chart data from Yahoo Finance & Finnhub |
-| 💬 **Bahasa Melayu AI** | All AI responses are in Bahasa Melayu with emoji-rich formatting |
-| 🧮 **Zakat Calculator** | Calculates Nisab using live gold prices; saves zakat profile per user |
-| 💼 **Portfolio Tracker** | Tracks holdings with live P&L, enriched with current market prices |
-| 👀 **Watchlist** | Monitors stocks with live price movement data |
-| 🎯 **Tabung Goal** | Savings goal tracker (e.g. Haji fund) shown to the AI swarm as context |
-| 🔐 **Firebase Auth** | JWT-based authentication with token revocation checks on every request |
+[Back to navigation](#navigation)
 
----
+## Key Features
 
-## 🛠️ Technology Stack
+- Email/password and Google sign-in through Firebase Authentication.
+- Investment preferences, risk settings, and portfolio tracking.
+- Market quotes, historical charts, and news using Finnhub and Yahoo Finance data.
+- An AI advisor backed by specialist agents and a committee agent.
+- Scheduled scans for buy opportunities and portfolio-aware sell recommendations.
+- Paper execution for equities and ETFs, with Thetanuts options integration for BTC and ETH.
+- Manual, alert-only, confirmation-based, and automated recommendation modes.
+- In-app notifications and optional Firebase push notifications.
+- Blockchain wallet balance checks, transaction previews, and transaction history.
 
-### Frontend
+[Back to navigation](#navigation)
 
-| Technology | Purpose |
-|---|---|
-| **React 19** | Frontend UI framework |
-| **Vite** | Build tool and development server |
-| **React Router DOM** | Client-side routing and navigation |
-| **Firebase SDK** | Authentication and frontend Firebase integration |
-| **Axios** | API communication with Flask backend |
-| **React Icons** | Dashboard and navigation icons |
-| **Recharts** | Financial charts and data visualization |
-| **Context API** | Global AI advisor state management |
+## Problem Statement
 
-### Backend
+Retail investors often need to move between separate tools to research assets, interpret news, assess risk, track their portfolios, and act on investment opportunities. This fragmented process makes it difficult to turn market information into consistent decisions that reflect an investor's preferences.
 
-| Technology | Version | Purpose |
-|---|---|---|
-| **Python** | 3.11+ | Core runtime |
-| **Flask** | 3.x | REST API framework |
-| **Flask-CORS** | latest | Cross-origin request handling |
-| **Flask-Limiter** | latest | Rate limiting (1000/day, 120/min) |
-| **Werkzeug ProxyFix** | built-in | Correct IP detection behind reverse proxy |
+Blockchain options introduce additional steps: selecting a suitable contract, checking collateral and gas balances, approving token spending, and confirming execution. These steps can be difficult to connect with the research that motivated the trade.
 
-### Database & Auth
+AmanahAI addresses this by bringing research, portfolio context, risk-aware recommendations, and supported execution workflows together. It helps users review the reasoning behind opportunities and choose their preferred level of involvement before taking action.
 
-| Technology | Purpose |
-|---|---|
-| **Firebase Firestore** | NoSQL document database — users, portfolios, chat, zakat |
-| **Firebase Authentication** | JWT-based user auth with revocation checking |
-| **firebase-admin SDK** | Server-side Firebase access |
+[Back to navigation](#navigation)
 
-### Data Sources
+## Architecture
 
-| Source | Library | Data Provided |
-|---|---|---|
-| **Yahoo Finance** | `yfinance` | Live quotes, fundamentals, historical candles, stock search |
-| **Finnhub API** | `requests` / `httpx` | Shariah screening, news sentiment, social sentiment |
-| **Gold Price API** | `requests` | Live gold price for Nisab calculation (7-day Firestore cache) |
+The React interface sends requests to Flask. Backend services coordinate market data, AI analysis, user preferences, and trade execution. The diagram below shows the main analysis and option BUY flow; supported RFQ position closes follow a separate CLI path described below.
 
-### AI Providers
+```mermaid
+flowchart TD
+    UI["React dashboard and AI advisor"] <-->|"Requests and responses"| API
+    UI <--> FB["Firebase Auth and Firestore"]
+    FCM["Firebase Cloud Messaging"] -->|"Push notifications"| UI
 
-| Provider | Model | Role |
-|---|---|---|
-| **Groq** | `llama-3.3-70b-versatile` | Primary — swarm agents + final advisor response |
-| **OpenRouter** | `qwen/qwen-2.5-72b-instruct` | Fallback #1 for swarm and advisor |
-| **Google Gemini** | `gemini-2.5-flash` | Fallback #2 for swarm and advisor |
+    subgraph BACKEND["Python Flask backend"]
+        API["Flask routes"] --> ORCH["Analysis orchestration<br/>Market snapshot and screening"]
+        SCAN["APScheduler<br/>Buy and portfolio sell scans"] --> ORCH
+        ORCH --> AI["Technical, fundamental and news agents<br/>Run in parallel"]
+        AI --> RISK["Risk agent<br/>Reviews specialist reports"]
+        AI --> COMMITTEE["Committee agent"]
+        RISK --> COMMITTEE
+        COMMITTEE -->|"Analysis result"| API
+        API -->|"User action"| ROUTER
+        COMMITTEE -->|"Scheduled opportunity dispatch"| ROUTER
+        ROUTER["Proposal preparation and action services<br/>Preferences, confirmation and validation"] --> PAPER["Paper equity execution"]
+        ROUTER <--> TRADER["ThetanutsTrader<br/>Orders, wallet checks and BUY fills"]
+        TRADER -->|"Preview or execution result"| API
+    end
 
-### Python Dependencies
+    DATA["Finnhub and Yahoo Finance"] --> ORCH
+    LLM["Groq / OpenRouter / Gemini"] <--> AI
+    LLM <--> RISK
+    LLM <--> COMMITTEE
+    API <--> FB
+    PAPER --> FB
+    ROUTER --> FCM
+    TRADER <-->|"Orders and BUY preview calldata"| CLI["Thetanuts CLI"]
+    TRADER <-->|"Web3.py: reads; signs BUY transactions only outside dry-run"| BASE["Base RPC<br/>Anvil fork for local demo<br/>USDC and Thetanuts contracts"]
 
-```
-flask flask-cors flask-limiter
-firebase-admin
-yfinance httpx requests
-python-dotenv
-aiohttp asyncio
+    classDef interface fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e;
+    classDef intelligence fill:#ede9fe,stroke:#7c3aed,color:#3b0764;
+    classDef chain fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class UI,API interface;
+    class ORCH,AI,RISK,COMMITTEE intelligence;
+    class TRADER,CLI,BASE chain;
 ```
 
----
+Implementation details:
 
-## 🤖 AI System
+- **AI sequence:** technical, fundamental, and news reports run in parallel. The risk agent reviews those reports, then the committee combines all four. AI output is passed to application services; the agents do not sign transactions.
+- **Action modes:** manual and alert-only modes do not automatically execute. Confirmation mode waits for user approval; automated mode can dispatch a prepared proposal without a user click. Unsupported assets remain recommendation-only.
+- **Option BUY:** the CLI supplies orders and fresh preview calldata. With dry-run disabled, `ThetanutsTrader` uses Web3.py to validate the chain and balances, approve USDC when necessary, submit the fill, and check receipts. Responses return through Flask to React.
+- **Option SELL:** only supported RFQ positions can be closed. `close_rfq_position()` delegates to the CLI's `position close` command; it does not use the BUY signing path. OptionBook exits are not implemented by this close flow.
+- **State and notifications:** Firebase handles authentication, Firestore stores application data, and Cloud Messaging delivers optional push notifications. The backend also records fill attempts in a local JSONL log.
+- **Local fork:** the backend RPC is `http://127.0.0.1:8545` for the demo. CLI subprocesses inherit the environment, but the wrapper does not pass an explicit RPC flag; the CLI's effective network configuration must also be checked for local-fork execution.
 
-Amanah's intelligence layer is built on three tiers: the swarm simulation, the consensus engine, the final advisor, and the Shariah compliance filter.
+[Back to navigation](#navigation)
 
-### 1. 🧠 The Swarm — 8 Parallel AI Agents
+## Blockchain Technology Used
 
-The core of Amanah is `SwarmSimulationEngine` (`mirofish_loop.py`). When a user asks about a stock, 8 AI agents run **simultaneously** using `asyncio.gather`, each with a distinct persona, weight, and temperature. They each return a structured JSON vote.
+| Technology | Use in this project |
+| --- | --- |
+| Base / EVM | The current live transaction implementation targets Base mainnet, chain ID `8453`. |
+| Thetanuts Finance | The backend invokes `@thetanuts-finance/cli` to retrieve OptionBook orders and generate transaction previews and fill calldata. The root package also includes the Thetanuts client library. |
+| USDC (ERC-20) | Used for option collateral and token allowance checks. |
+| ETH | Used to pay transaction gas. |
+| Web3.py and eth-account | Read balances and allowances, sign transactions, submit them, and check receipts. |
+| ethers.js | Included among the root JavaScript dependencies for EVM integration. |
 
-| Agent | Persona | Weight | Temperature | Focus |
-|---|---|---|---|---|
-| 🕌 `ETHICAL_COMPLIANCE_OFFICER` | Strict Shariah gatekeeper | 1.00 | 0.1 | Debt ratio; issues VETO if > 33% |
-| 📋 `FUNDAMENTALS_AGENT` | Long-term equity analyst | 0.85 | 0.2 | P/E, margin, market cap, D/E |
-| 📈 `TREND_AGENT` | Technical analysis expert | 0.75 | 0.3 | Price momentum, 52W range, chart patterns |
-| 🛡️ `CONSERVATIVE_PRESERVER` | Capital protection first | 0.80 | 0.2 | Risk aversion, low debt preference |
-| 💬 `SENTIMENT_AGENT` | Market mood analyst | 0.60 | 0.6 | News score, social buzz, divergence detection |
-| 🔍 `VALUE_SNIPER` | Contrarian value hunter | 0.70 | 0.3 | Intrinsic value vs market price |
-| 📊 `MOMENTUM_FOLLOWER` | Trend-chasing trader | 0.50 | 0.8 | Crowd sentiment, price hype |
-| 🚀 `AGGRESSIVE_SPECULATOR` | High-risk, high-reward | 0.40 | 0.9 | Maximum ROI, growth over safety |
+The backend uses a configured server-side wallet through `WALLET_PRIVATE_KEY`. Options are selected using the underlying asset, option type, strike(s), and expiry. Live fills check the chain, available collateral, gas, token allowance, and transaction receipts.
 
-**Each agent receives:**
-- Shariah compliance status + reason
-- Live price data (current price, change%, 52W high/low)
-- Fundamentals (P/E, market cap, net profit margin, D/E)
-- Sentiment data (buzz score, news score, social score)
-- User's financial goal (Tabung) as context
+Equity trades are paper trades stored by the application. They are not on-chain equity purchases. Unsupported crypto assets remain recommendation-only.
 
-**Each agent returns:**
-```json
-{
-  "decision": "BUY",
-  "confidence": 82,
-  "reasoning": "Strong fundamentals with P/E below sector average and positive momentum."
-}
-```
+### Smart Contract Addresses (Local Fork / Testnet)
 
-### 2. ⚖️ Consensus Engine (`consensus_engine.py`)
+The demo uses a local fork of Base mainnet. These are fork-based testing details, not public testnet deployments.
 
-After the swarm votes, `calculate_swarm_consensus()` aggregates results using a weighted scoring system:
+- **USDC (Base Mainnet Fork):** `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
+- **Thetanuts Contracts:** Automatically resolved via `@thetanuts-finance/cli` on Base. The backend obtains the OptionBook transaction destination from the CLI preview.
+- **Demo Trading Wallet:** `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (Anvil Account #0). This is a wallet address, not a smart contract address.
 
-- **VETO** is a separate axis — one VETO overrides all market votes, representing a Shariah structural rejection
-- **Three-axis pressure**: bullish %, bearish %, neutral % (weighted scores)
-- **Confidence variance**: detects hidden instability when agents disagree on certainty
-- **Temporal intelligence**: tracks confidence delta and trend direction vs previous run
-- **Loudest dissenter**: surfaces the most impactful minority opinion
+The local fork must use chain ID `8453` to match the backend's live fill validation. Configure the backend RPC to point to the local fork. The Anvil demo account is for local testing only; its default private key is publicly known.
 
-Output includes: `consensus`, `confidence`, `market_sentiment`, `risk_level`, `conflict_detected`, `market_state`, and a full `agent_breakdown`.
+[Back to navigation](#navigation)
 
-### 3. 💬 Final Advisor — "Amanah" (`prompt_engine.py` + `ai_agent.py`)
-
-After the swarm consensus is computed, the system builds a rich Bahasa Melayu prompt containing:
-- Swarm consensus summary with all 8 agents' votes, confidence bars, and reasoning
-- Real-time market data block (price, MA50/MA200, P/E, sentiment)
-- Shariah status and reason
-- User profile context (income, risk tolerance, tabung goal progress)
-
-This prompt is sent through the **primary LLM provider** (Groq → OpenRouter → Gemini fallback chain) to generate a final conversational response as "Amanah".
-
-### 4. 🕌 Shariah Filter (`shariah_filter.py`)
-
-A rule-based compliance engine using Finnhub data — not a generative AI — ensuring deterministic, auditable screening:
-
-1. **Forbidden sector check** — gambling, alcohol, tobacco, weapons, pork, pornography
-2. **Conventional finance check** — skipped for Islamic institutions (whitelist: BIMB, Maybank Islamic, Takaful, etc.)
-3. **Debt/Equity ratio check** — > 33.33% triggers automatic rejection (AAOIFI standard); Islamic banks are exempt as their balance sheet structure inflates D/E structurally
-
----
-
-## 🏗️ Architecture
-
-### Request Lifecycle
-
-```
-Frontend (React + Vite SPA)
-    │
-    │  POST /api/aiagent/ai/chat
-    │  Headers: Authorization: Bearer <Firebase JWT>
-    │
-    ▼
-Flask App  ──►  ProxyFix  ──►  CORS  ──►  RateLimiter
-    │
-    ▼
-require_auth middleware
-    ├── Verify Firebase JWT (check_revoked=True)
-    ├── Extract UID → store in g.uid
-    └── Reject with 401 on any failure
-    │
-    ▼
-ai_routes.py  (POST /chat)
-    ├── Load user preferences + tabung_goal from Firestore
-    └── Pass to AIAgent.process()
-    │
-    ▼
-AIAgent.process()
-    │
-    ├── Auto-detect ticker (regex on message + pageContext)
-    ├── shariahfilter.check_compliance(ticker)  [Finnhub]
-    │
-    ├── [NO TICKER] ─── Build general Q&A prompt ──────────────────┐
-    │                                                               │
-    └── [TICKER FOUND]                                             │
-          │                                                         │
-          ├── bina_data_kuantitatif()  [asyncio.gather]            │
-          │     ├── ambil_data_harga_dan_asas()  [yfinance]        │
-          │     └── ambil_sentimen_berita()  [Finnhub]             │
-          │                                                         │
-          ├── SwarmSimulationEngine.execute_rehearsal()            │
-          │     └── 8 agents × asyncio.gather  [Groq API]         │
-          │                                                         │
-          ├── calculate_swarm_consensus()                          │
-          │                                                         │
-          └── format_agent_input()  [build Malay prompt]           │
-                │                                                   │
-                ▼                                                   │
-        build_final_response()  ◄──────────────────────────────────┘
-              ├── Try Groq  (llama-3.3-70b)
-              ├── Try OpenRouter  (qwen-2.5-72b)  [fallback]
-              └── Try Gemini  (gemini-2.5-flash)  [fallback]
-                    │
-                    ▼
-            JSON response to frontend ✅
-```
-
-### Backend Blueprint Structure
-
-```
-app.py
-├── /api/stocks/portfolio/*  ──►  portfolio_routes.py
-│     ├── GET  /my-portfolio          Live-enriched holdings
-│     ├── GET  /stock/<ticker>        Quote + fundamentals + chart
-│     ├── POST /buy                   Add/update holding
-│     ├── POST /watchlist             Add/update watchlist item
-│     ├── POST /watchlist/remove      Remove from watchlist
-│     ├── POST /update                Save user preferences
-│     ├── GET  /me                    Load user profile
-│     └── POST /goal                  Save Tabung savings goal
-│
-├── /api/stocks/market/*     ──►  market_routes.py
-│     ├── GET  /details/<ticker>      Quote + fundamentals + Shariah (one call)
-│     ├── GET  /chart/<ticker>        Historical candle data
-│     ├── GET  /search?q=             Stock symbol search
-│     └── GET  /all                   Halal stock discovery list
-│
-├── /api/zakat/*             ──►  zakat_endpoints.py
-│     ├── GET  /nisab                 Live Nisab value (gold price × 85g)
-│     ├── GET  /data                  Load user's saved zakat profile
-│     └── POST /save-data             Save zakat calculation state
-│
-└── /api/aiagent/ai/*        ──►  ai_routes.py
-      ├── POST /chat                  Send message, receive AI response
-      ├── GET  /history               Load chat session history
-      └── DELETE /history             Clear chat session
-```
-
-### Frontend Structure
-
-```
-src/
-├── App.js                          # Router Configuration
-│
-├── 1️⃣ Authentication & Onboarding
-│    ├── Auth.jsx                   # Login/Signup (Firebase Email + Google OAuth)
-│    └── preferences.jsx            # Multi-step financial profile survey
-│
-├── 2️⃣ Main Application Shell
-│    └── AppLayout.jsx
-│
-└── 3️⃣ Core Feature Pages
-     │
-     ├── Page A: Zakat Center (Zakat.jsx)
-     │    ├── ZakatNisab.jsx         # Live Gold Price and Nisab threshold fetcher
-     │    ├── Zakatasset.jsx         # Savings, Investments, Gold, Business inputs
-     │    ├── ZakatLiabiliti.jsx     # Debt and loan deductions
-     │    ├── Zakatbleamount.jsx     # Haul date tracker & Net Wealth calculation
-     │    ├── Zakatringkasan.jsx     # Final eligibility check & 2.5% payable calculation
-     │    └── Zakatgoals.jsx         # Financial targets (Umrah, Home, etc.)
-     │
-     ├── Page B: Stocks Market (Stocks.jsx)
-     │    ├── StockSearchBar.jsx     # Debounced API search with keyboard nav
-     │    ├── StockHeader.jsx        # Live quote, ticker, and daily change
-     │    ├── StockChart.jsx         # Recharts AreaChart with timeframe toggles
-     │    ├── StockDetails.jsx       # Shariah status, PE ratio, Dividend yield grid
-     │    └── StockSidePanel.jsx     # Drag-and-drop Watchlist sidebar
-     │         └── WatchCard.jsx     # Individual tracked stock component
-     │
-     └── Page C: AI Advisor
-          ├── AIAdvisorContext.jsx   # Manages chat history state via sessionStorage
-          ├── AIAdvisorPanel.jsx     # The floating chat UI & file attachment handler
-          └── TextHighlightAsk.jsx  # Listens for text selection to trigger "Ask AI"
-```
-
-### Key Frontend Services
-
-#### 1. Authentication & Onboarding (`Auth.jsx`, `preferences.jsx`)
-- **Multi-Provider Authentication**: Secure login and registration using Firebase Authentication (Email/Password & Google OAuth).
-- **Smart Routing**: Checks Firestore upon login to determine if a user has completed their financial profile; dynamically routes new users to the onboarding survey and returning users to their dashboard.
-- **Interactive Financial Profiling**: A multi-step, progress-tracked survey capturing employment status, income, investment experience, risk tolerance, and Zakat goals. Data is securely transmitted to the backend via Firebase Auth tokens.
-
-#### 2. Shariah AI Advisor (`AIAdvisorContext.jsx`, `AIAdvisorPanel.jsx`, `TextHighlightAsk.jsx`, `Advisor.jsx`)
-- **Context-Aware Chat**: A floating AI panel that retains chat history using `sessionStorage` across page navigations.
-- **Highlight-to-Ask**: Users can highlight text anywhere on the page to trigger a floating "Ask AI" widget, instantly passing the highlighted text as context to the AI model.
-- **Multimodal Inputs**: Supports rich user queries including text and file attachments (PDF/Images up to 5MB), safely serialized and sent to the Flask AI backend.
-- **Real-time UX**: Features smooth auto-scrolling, dynamic textarea resizing, and typing indicators for a natural conversational feel.
-
-#### 3. Stock Market & Portfolio Dashboard (`Stocks.jsx`)
-- **Unified Market Dashboard**: Integrates real-time Shariah-compliant stock screening, quotes, and company details in a single view.
-- **Interactive Data Visualization**: Utilizes `recharts` to render responsive, interactive area charts with custom tooltips, dynamic high/low domains, and multiple timeframe selections (1D, 1W, 1M, 3M, 1Y, ALL).
-- **Smart Search Bar**: Features a debounced (500ms) search input with full keyboard navigation support (Up/Down arrows, Enter, Escape) for seamless ticker discovery.
-- **Drag-and-Drop Watchlist**: A persistent, Firebase-synced side panel allowing users to track favourite stocks and intuitively reorder them using the HTML5 Drag and Drop API.
-
-#### 4. Financial Planning (`Zakat.jsx`)
-- **Live Market Integration**: Automatically fetches real-time Nisab thresholds and Gold prices upon component mount.
-- **Comprehensive Tracking**: Aggregates data from user-defined assets and liabilities to calculate the net Zakat-able amount.
-- **Interactive Goal Management**: Users can create new goals with custom icons, target amounts, and deadlines, as well as log new savings increments and reorder goals by priority.
-- **Modular Architecture**: Breaks down complex calculations into distinct, manageable components (`ZakatAsset`, `ZakatLiabiliti`, `ZakatNisab`, `ZakatRingkasan`, `Zakatbleamount`, `Zakatgoals`).
-
----
-
-## 🗄️ Database Schema
-
-Amanah uses **Cloud Firestore** with the following structure:
-
-```
-users/
-└── {user_id}/                          ← Firebase Auth UID
-    ├── email                  (string)
-    ├── profile_complete       (boolean)
-    ├── zakat_last_updated     (string, ISO 8601)
-    │
-    ├── preference             (map)
-    │   ├── employmentStatus   (string)
-    │   ├── monthlyIncome      (number)
-    │   ├── investmentExperience (string)
-    │   ├── riskTolerance      (string)
-    │   └── zakatGoal          (string)
-    │
-    ├── portfolio              (array of maps)
-    │   └── { sticker, name, shares, fields, chart, watchlist }
-    │
-    ├── watchlist              (array of maps)
-    │   └── { sticker, price, change, changePercent,
-    │          changeFromOpen, changePercentFromOpen, marketStatus }
-    │
-    ├── tabung_goal            (map)
-    │   └── { goaltitle, date, totalamount, totalgatheredamount }
-    │
-    ├── zakat_profile          (map)
-    │   └── { nisab_amount, assets, liabilities,
-    │          net_amount, zakat_due, haul_date, zakat_goals }
-    │
-    └── chat_sessions/                  ← Subcollection
-        └── {session_id}/              ← e.g. "2026-05-24"
-            ├── last_updated  (string)
-            └── messages/              ← Subcollection
-                └── {message_id}/
-                    ├── role      (string)  "user" | "assistant"
-                    ├── content   (string)
-                    ├── ticker    (string, nullable)
-                    └── timestamp (string)
-
-system_config/
-└── gold_rate/
-    ├── gold_price   (number)   RM per gram
-    └── updated_at   (string)   Refreshed every 7 days
-```
-
----
-
-## 📡 API Reference
-
-All endpoints require `Authorization: Bearer <Firebase JWT>` header.
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/aiagent/ai/chat` | Send message to Amanah AI |
-| `GET` | `/api/aiagent/ai/history` | Load chat history for a session |
-| `DELETE` | `/api/aiagent/ai/history` | Clear a chat session |
-| `GET` | `/api/stocks/market/details/<ticker>` | Quote + fundamentals + Shariah status |
-| `GET` | `/api/stocks/market/chart/<ticker>?period=1Y` | Historical chart data |
-| `GET` | `/api/stocks/market/search?q=MAYBANK` | Search for stock symbols |
-| `GET` | `/api/stocks/market/all` | Discover Shariah-compliant stocks |
-| `GET` | `/api/stocks/portfolio/my-portfolio` | Load enriched portfolio |
-| `GET` | `/api/stocks/portfolio/stock/<ticker>` | Stock detail with chart |
-| `POST` | `/api/stocks/portfolio/buy` | Add/update a holding |
-| `POST` | `/api/stocks/portfolio/watchlist` | Add/update watchlist |
-| `POST` | `/api/stocks/portfolio/goal` | Save Tabung savings goal |
-| `GET` | `/api/zakat/nisab` | Get live Nisab value |
-| `GET` | `/api/zakat/data` | Load zakat profile |
-| `POST` | `/api/zakat/save-data` | Save zakat calculation |
-| `GET` | `/api/health` | Server health check |
-
----
-
-## 🚀 Setup & Installation
+## Setup and Installation
 
 ### Prerequisites
 
-- Node.js 20+
-- npm
-- Python 3.11+
-- A Firebase project with **Firestore** and **Authentication** enabled
-- API keys for Groq, Finnhub, and (optionally) OpenRouter and Gemini
+- Python 3.10 or newer (the source uses Python 3.10 union type syntax).
+- Node.js 22.12 or newer and npm, matching the frontend's recorded Vite engine requirement.
+- A Firebase project with Authentication and Cloud Firestore configured.
+- A Finnhub API key for market data.
+- At least one AI provider key: Groq, OpenRouter, or Gemini.
+- For blockchain features: a compatible RPC endpoint and a dedicated development wallet.
 
-### Backend Setup
+### 1. Install JavaScript dependencies
 
-**1. Clone the repository**
+Open a terminal in the repository root:
 
-```bash
-git clone https://github.com/your-username/amanah-backend.git
-cd amanah-backend
+```sh
+npm ci
+cd frontend
+npm ci
+cd ..
 ```
 
-**2. Create and activate a virtual environment**
+The backend invokes the Thetanuts CLI through `npx`, so Node.js and npm must also be available to the backend process. The CLI may require a download on first use.
 
-```bash
+### 2. Create a Python environment
+
+From the repository root:
+
+```sh
 python -m venv venv
+```
 
-# macOS / Linux
+Activate it on Windows PowerShell:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+Or on macOS/Linux:
+
+```sh
 source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
 ```
 
-**3. Install dependencies**
+Install the packages used by the backend:
 
-```bash
-pip install flask flask-cors flask-limiter werkzeug \
-            firebase-admin \
-            yfinance httpx requests \
-            python-dotenv \
-            aiohttp
+```sh
+python -m pip install --upgrade pip
+python -m pip install Flask flask-cors Flask-Limiter python-dotenv firebase-admin requests yfinance aiohttp httpx web3 eth-account "APScheduler>=3,<4" tzdata
 ```
 
-Or if you have a `requirements.txt`:
+The repository does not currently include a Python requirements or lock file. This dependency list is derived from the source imports; it is not a pinned, reproducible Python environment.
 
-```bash
-pip install -r requirements.txt
+### 3. Configure Firebase
+
+1. Register a web application in your Firebase project.
+2. Enable Email/Password and Google sign-in, and authorise the local development domain, such as `localhost`.
+3. Create a Cloud Firestore database and configure rules that allow authenticated users to access their own application data.
+4. Download a Firebase Admin service account JSON file and save it as `backend/firebase-adminsdk.json`. The backend requires this exact path at startup.
+5. For push notifications, configure Firebase Cloud Messaging and obtain a web push VAPID public key.
+
+Use the same Firebase project for the frontend configuration and backend service account. Keep the service account file and private credentials out of version control; the repository already ignores the service account path and `.env` files.
+
+### 4. Configure the backend
+
+Create `backend/.env`:
+
+```dotenv
+PORT=5000
+FINNHUB_API_KEY=your_finnhub_api_key
+
+# Configure at least one provider. Leave unused providers empty.
+GROQ_API_KEY=your_groq_api_key
+OPENROUTER_API_KEY=
+GEMINI_API_KEY=
+
+# Keep blockchain submissions in preview mode during development.
+FORCE_DRY_RUN=true
+
+# Optional wallet features; use a dedicated development wallet.
+WALLET_PRIVATE_KEY=
+BASE_RPC_URL=http://127.0.0.1:8545
+
+OPPORTUNITY_SCAN_INTERVAL_MINUTES=30
+TOP_N_OPPORTUNITIES=5
+PAPER_CASH_USD=10000
+PAPER_PORTFOLIO_VALUE_USD=10000
 ```
 
-**4. Add your Firebase service account**
+The local RPC URL assumes that a compatible local node or Base fork is already running; follow the Git Bash instructions below to start one. Wallet features are disabled when the private key is empty. Dry-run mode prevents blockchain transaction submission but can still require network access for quotes and previews. It is not a testnet deployment.
 
-Download your Firebase Admin SDK credentials from:
-**Firebase Console → Project Settings → Service Accounts → Generate new private key**
+[Back to navigation](#navigation)
 
-Save the file as `firebase-adminsdk.json` in the project root.
+### Set up Anvil and virtual funds (Windows Git Bash)
 
-> ⚠️ **Never commit this file.** Add it to `.gitignore`.
+Use **Git Bash** for the commands in this section. The ETH and USDC created here exist only on your local fork and have no real monetary value.
 
-**5. Create your `.env` file**
+#### A. Install Foundry
+
+Run the official Foundry installer, then add its binaries to the current terminal's path:
 
 ```bash
-cp .env.example .env
+curl -L https://foundry.paradigm.xyz | bash
+export PATH="$HOME/.foundry/bin:$PATH"
+foundryup
+anvil --version
+cast --version
 ```
 
-Then fill in your values (see [Environment Variables](#-environment-variables) below).
+If a new terminal cannot find `anvil` or `cast`, run the `export PATH` command there too. See the [Foundry installation guide](https://getfoundry.sh/getting-started/installation).
 
-**6. Run the server**
+#### B. Start a Base mainnet fork
+
+In the first Git Bash terminal, replace the placeholder with a Base mainnet RPC endpoint from your provider:
 
 ```bash
+export BASE_FORK_SOURCE_URL="https://YOUR_BASE_MAINNET_RPC_ENDPOINT"
+anvil --fork-url "$BASE_FORK_SOURCE_URL" --chain-id 8453 --host 127.0.0.1 --port 8545 --balance 10000
+```
+
+Keep this terminal running. The upstream endpoint supplies Base state; the app will connect to `http://127.0.0.1:8545`. Chain ID `8453` matches the backend's validation. A plain `anvil` command without `--fork-url` does not load Base's USDC or Thetanuts contracts.
+
+Anvil prints its development accounts and their private keys. Account #0 is `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` with the default mnemonic. The command funds each development account with 10,000 local ETH. See [Anvil's account and forking documentation](https://www.getfoundry.sh/anvil/index.html).
+
+#### C. Add 10,000 local USDC
+
+<details>
+<summary><strong>Click to expand: Commands to mint 10,000 local USDC</strong></summary>
+
+In a **second Git Bash terminal**, define the local RPC and addresses:
+
+```bash
+export PATH="$HOME/.foundry/bin:$PATH"
+LOCAL_RPC_URL="http://127.0.0.1:8545"
+DEMO_WALLET="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+USDC_ADDRESS="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+cast chain-id --rpc-url "$LOCAL_RPC_URL"
+cast balance "$DEMO_WALLET" --ether --rpc-url "$LOCAL_RPC_URL"
+cast call "$USDC_ADDRESS" "decimals()(uint8)" --rpc-url "$LOCAL_RPC_URL"
+```
+
+Expect chain ID `8453`, approximately `10000` ETH on a fresh fork, and `6` USDC decimals. Stop if these checks fail; confirm that Anvil is running and the upstream RPC serves Base mainnet state.
+
+The following commands use Anvil's local account impersonation to configure the demo wallet as a minter, then mint 10,000 USDC. This uses the token's `masterMinter`, `configureMinter`, and `mint` interfaces from [Circle's contract source](https://github.com/circlefin/stablecoin-evm/blob/master/contracts/v1/FiatTokenV1.sol). It changes only the local fork; keep every command pointed at the loopback RPC shown above.
+
+```bash
+# Read the authority from the fork instead of hardcoding its address.
+USDC_MASTER_MINTER=$(cast call "$USDC_ADDRESS" "masterMinter()(address)" --rpc-url "$LOCAL_RPC_URL")
+
+# Allow this authority to send a transaction on the local Anvil node.
+cast rpc anvil_impersonateAccount "$USDC_MASTER_MINTER" --rpc-url "$LOCAL_RPC_URL"
+cast rpc anvil_setBalance "$USDC_MASTER_MINTER" 0xDE0B6B3A7640000 --rpc-url "$LOCAL_RPC_URL"
+
+# USDC uses 6 decimals: 10000 * 1000000 = 10000000000 raw units.
+cast send "$USDC_ADDRESS" "configureMinter(address,uint256)" "$DEMO_WALLET" 10000000000 --from "$USDC_MASTER_MINTER" --unlocked --rpc-url "$LOCAL_RPC_URL"
+cast rpc anvil_stopImpersonatingAccount "$USDC_MASTER_MINTER" --rpc-url "$LOCAL_RPC_URL"
+
+# Anvil's default demo account is already unlocked.
+cast send "$USDC_ADDRESS" "mint(address,uint256)" "$DEMO_WALLET" 10000000000 --from "$DEMO_WALLET" --unlocked --rpc-url "$LOCAL_RPC_URL"
+
+# Verify the result.
+cast call "$USDC_ADDRESS" "balanceOf(address)(uint256)" "$DEMO_WALLET" --rpc-url "$LOCAL_RPC_URL"
+cast balance "$DEMO_WALLET" --ether --rpc-url "$LOCAL_RPC_URL"
+```
+
+On a fresh fork, the USDC balance should be `10000000000` raw units, equivalent to **10,000 USDC**. Running the minting sequence again adds another 10,000 USDC. If a transaction reverts, stop and inspect the error; this procedure assumes the forked token exposes these interfaces and is not paused.
+
+</details>
+
+#### D. Connect AmanahAI to the funded account
+
+Update these entries in `backend/.env`, copying the private key for **Account #0** from your Anvil terminal:
+
+```dotenv
+BASE_RPC_URL=http://127.0.0.1:8545
+WALLET_PRIVATE_KEY=replace_with_anvil_account_0_private_key
+FORCE_DRY_RUN=true
+```
+
+Restart the backend after editing `.env`, then check the wallet balance in the application. Keep Anvil running alongside the backend and frontend. To activate the Python environment from Git Bash, run `source venv/Scripts/activate` from the repository root.
+
+`FORCE_DRY_RUN=true` keeps option fills in preview mode. To test actual transaction submission **on this local fork**, set it to `false` only while `BASE_RPC_URL` points to your local Anvil node, then restart the backend. Thetanuts quotes and previews may still depend on external services; funding the wallet alone does not guarantee an available or executable option order.
+
+Stopping Anvil and starting a fresh instance resets the local funding and transactions, so repeat the funding steps after a reset. Do not send real funds to Anvil's publicly known development accounts.
+
+[Back to navigation](#navigation)
+
+### 5. Configure the frontend
+
+Create `frontend/.env` using your Firebase web application settings:
+
+```dotenv
+VITE_FIREBASE_API_KEY=your_firebase_web_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_storage_bucket
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
+VITE_FIREBASE_APP_ID=your_web_app_id
+VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
+
+# Optional: required for browser push notifications.
+VITE_FIREBASE_VAPID_KEY=your_web_push_public_key
+
+VITE_BACKEND_URL=http://localhost:5000
+VITE_API_BASE_URL=http://127.0.0.1:5000/api
+```
+
+Several frontend pages still hardcode backend URLs on port `5000`. Keep that port for local development; changing only these environment variables does not update every API call. Values prefixed with `VITE_` are exposed to the browser, so never place wallet private keys or service account credentials there.
+
+### 6. Start the application
+
+In the first terminal, with the Python environment active:
+
+```sh
+cd backend
 python app.py
 ```
 
-The server starts on `http://localhost:5000`.
+In a second terminal, starting from the repository root:
 
-```
-INFO: * Running on http://0.0.0.0:5000
-INFO: Welcome to the FinHack2026 Backend! 🚀
-```
-
-Verify with:
-
-```bash
-curl http://localhost:5000/api/health
-# → {"message": "Modular Islamic Stocks API is running! 🐍🚀"}
-```
-
-### Frontend Setup
-
-**1. Install dependencies**
-
-```bash
+```sh
 cd frontend
-npm install
-```
-
-**2. Create the frontend `.env` file**
-
-Create a `.env` file inside the `frontend/` directory:
-
-```env
-VITE_API_BASE_URL=http://localhost:5000
-
-VITE_FIREBASE_API_KEY=your_key
-VITE_FIREBASE_AUTH_DOMAIN=your_domain
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_bucket
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
-```
-
-**3. Start the development server**
-
-```bash
 npm run dev
 ```
 
-The frontend starts on `http://localhost:5173`.
+Open the frontend URL printed by Vite, normally `http://localhost:5173`. Check the backend at `http://localhost:5000/api/health`. Sign up, complete your investment preferences, and open the dashboard.
 
----
+Starting `app.py` also starts the background opportunity scanner, which uses the configured market data and AI services.
 
-## 🔑 Environment Variables
+### 7. Development checks
 
-Create a `.env` file in the project root with the following keys:
+Run the existing execution routing tests from the repository root:
 
-```env
-# ── AI Providers (at least one is required) ─────────────────────────────────
-
-# Primary — used for both the swarm agents and the final advisor
-GROQ_API_KEY=gsk_...
-
-# Fallback #1
-OPENROUTER_API_KEY=sk-or-...
-
-# Fallback #2
-GEMINI_API_KEY=AIza...
-
-# ── Market Data ──────────────────────────────────────────────────────────────
-
-# Required for Shariah screening and news sentiment
-FINNHUB_API_KEY=c...
-
-# ── Development ──────────────────────────────────────────────────────────────
-
-# Set to "true" to skip the real gold price API and use a mock value
-MOCK_MODE=true
-
-# Server port (default: 5000)
-PORT=5000
+```sh
+cd backend
+python -m unittest discover -s tests
 ```
 
-### Minimum viable setup
+Build or lint the frontend from its directory:
 
-You can run Amanah with just **one AI provider** and **Finnhub**:
-
-```env
-GROQ_API_KEY=your_groq_key_here
-FINNHUB_API_KEY=your_finnhub_key_here
-MOCK_MODE=true
+```sh
+npm run build
+npm run lint
 ```
 
-### Provider priority
+The frontend build output is written to `frontend/dist`. These commands do not deploy the application or any smart contracts.
 
-The system tries providers in this order and falls back automatically:
+[Back to navigation](#navigation)
 
+## Project Structure
+
+```text
+AmanahAI/
+|-- backend/
+|   |-- agents/              # Specialist AI agents and orchestration
+|   |-- investment/          # Screening, ranking, and scheduled scans
+|   |-- services/            # Portfolio, execution, and notification services
+|   |-- trading/             # Contract selection and validation
+|   |-- tests/               # Execution routing tests
+|   |-- app.py               # Flask entry point
+|   `-- thetanuts_trader.py   # Blockchain wallet and options integration
+|-- frontend/
+|   |-- public/              # Static assets and messaging service worker
+|   |-- src/                 # React pages, components, and services
+|   `-- package.json
+|-- package.json             # Shared JavaScript dependencies
+`-- README.md
 ```
-Groq  →  OpenRouter  →  Gemini
-```
 
-If none are configured, the server will start but AI responses will fail with a 503.
+[Back to navigation](#navigation)
 
----
+## Team Members
 
-## 🔒 Security Notes
+- Goh Pei Jia
+- Coshin Lee
+- Ryan
 
-- All routes are protected by `require_auth` — Firebase JWT verification runs on every request with `check_revoked=True` to block revoked/logged-out tokens instantly
-- User IDs are always read from the verified JWT (`g.uid`), never from the request body
-- Chat history is passed from the frontend payload (not re-fetched from Firestore per message) and capped at 20 messages
-- Rate limiting is enforced globally: **1000 requests/day, 120 requests/minute** per IP
-
----
-
-</div>
+[Back to navigation](#navigation)
